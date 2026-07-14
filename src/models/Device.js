@@ -12,24 +12,47 @@ const LastLocationSchema = new mongoose.Schema(
 
 const DeviceSchema = new mongoose.Schema(
   {
-    // use device_id as _id so it's unique per device
+    // device_id / chipId is used as primary key
     _id: {
-      type: String, // device_id like "7454927D7850"
-      required: true,
+      type: String,
+      required: true, // e.g. "2C7A927D7850"
     },
 
-    name: { type: String }, // e.g. "Cow 01"
-    farmer: { type: String }, // owner / farmer name
-    status: {
+    // type from payload ("master", "slave", "status", etc.)
+    type: {
       type: String,
-      enum: ["online", "offline", "error", "unknown"],
       default: "unknown",
     },
 
-    lastSeen: { type: Date },
+    // MQTT group/prefix, e.g. "cc" from cc/<id>/payload
+    group: {
+      type: String,
+      default: "unknown",
+    },
+
+    // last time we got a message from this device
+    lastSeen: {
+      type: Date,
+    },
+
+    // last known GPS location
     lastLocation: LastLocationSchema,
 
-    notes: { type: String },
+    // last known battery snapshot
+    lastBatteryPercent: { type: Number },
+    lastBatteryVoltage: { type: Number },
+
+    // latest full payload for this device
+    // (we overwrite this on every new MQTT message)
+    meta: {
+      type: Object,
+      default: {},
+    },
+
+    // optional notes
+    notes: {
+      type: String,
+    },
   },
   {
     timestamps: true, // createdAt, updatedAt

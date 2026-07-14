@@ -1,63 +1,78 @@
 // src/mqtt/mqttClient.js
 require("dotenv").config();
 const mqtt = require("mqtt");
-const mongoose = require("mongoose");
 
 const Device = require("../models/Device");
+const Telemetry = require("../models/Telemetry");
 
-// tolerant JSON parsing for weird escaping from A9G
+// Robust JSON parser for payloads like:
+// {\"type\":\"slave\",\"device_id\":\"...\"}
 function parsePayload(rawStr) {
-  // 1) try normal JSON
+  // 1) normal JSON
   try {
     return JSON.parse(rawStr);
   } catch (e1) {
     // continue
   }
 
-  let s = rawStr.trim();
-
-  // 2) if wrapped in quotes: "\"{...}\""
-  if (s.startsWith('"') && s.endsWith('"')) {
-    s = s.slice(1, -1);
-    try {
-      return JSON.parse(s);
-    } catch (e2) {
-      // continue
+  // 2) double-encoded JSON string
+  try {
+    const once = JSON.parse(rawStr);
+    if (typeof once === "string") {
+      return JSON.parse(once);
     }
+  } catch (e2) {
+    // continue
   }
 
-  // 3) unescape \" -> "
-  const unescaped = s.replace(/\\\"/g, '"');
+  // 3) manually unescape
   try {
-    return JSON.parse(unescaped);
+    let cleaned = rawStr.trim();
+
+    if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+      cleaned = cleaned.slice(1, -1);
+    }
+
+    cleaned = cleaned.replace(/\\"/g, '"');
+
+    return JSON.parse(cleaned);
   } catch (e3) {
-    console.error("❌ Failed to parse MQTT JSON payload");
-    console.error("   raw     :", rawStr);
-    console.error("   cleaned :", unescaped);
+    console.error("❌ Failed to parse MQTT payload as JSON:", rawStr);
     throw e3;
   }
 }
 
 function startMqtt() {
-  const url = process.env.MQTT_URL;
-  const username = process.env.MQTT_USERNAME;
-  const password = process.env.MQTT_PASSWORD;
+  const mqttUrl = process.env.MQTT_URL || "mqtt://localhost:1883";
 
-  console.log("🔌 Connecting to MQTT broker:", url);
+  const options = {
+    clientId:
+      process.env.MQTT_CLIENT_ID ||
+      "moomap-backend-" + Math.random().toString(16).slice(2, 10),
+    clean: true,
+  };
 
-  const client = mqtt.connect(url, {
-    username,
-    password,
-    reconnectPeriod: 2000,
-  });
+  if (process.env.MQTT_USERNAME) {
+    options.username = process.env.MQTT_USERNAME;
+  }
+  if (process.env.MQTT_PASSWORD) {
+    options.password = process.env.MQTT_PASSWORD;
+  }
+
+  console.log("🔌 Connecting to MQTT broker:", mqttUrl);
+  const client = mqtt.connect(mqttUrl, options);
 
   client.on("connect", () => {
-    console.log("✔️ Connected to MQTT");
+    console.log("✔️ Connected to MQTT broker");
 
-    // your topic pattern: cc/<chip_id>/payload
-    client.subscribe("cc/+/payload", (err) => {
-      if (err) console.error("MQTT subscribe error:", err);
-      else console.log("📡 Subscribed to: cc/+/payload");
+    const topic = process.env.MQTT_TOPIC || "cc/+/payload";
+
+    client.subscribe(topic, (err) => {
+      if (err) {
+        console.error("❌ MQTT subscribe error:", err);
+      } else {
+        console.log("📡 Subscribed to topic:", topic);
+      }
     });
   });
 
@@ -69,36 +84,72 @@ function startMqtt() {
     const payloadStr = message.toString();
     console.log("📩 MQTT message:", topic, payloadStr);
 
+    let payload;
     try {
-      // parse JSON (handling escaped style)
-      const payload = parsePayload(payloadStr);
+      payload = parsePayload(payloadStr);
+    } catch (err) {
+      console.error("❌ Ignoring message: invalid JSON");
+      return;
+    }
 
-      // topic format: cc/<chip_id>/payload
-      const parts = topic.split("/");
-      const chipIdFromTopic = parts[1];
+    // topic: cc/7454927D7850/payload
+    const parts = topic.split("/");
+    const group = parts[0] || "unknown";
+    const chipFromTopic = parts[1];
 
-      // get device_id from payload if present, else from topic
-      const deviceId = payload.device_id || chipIdFromTopic;
+    // prefer device_id from payload, then chipFromTopic
+    const deviceId =
+      payload.device_id ||
+      payload.chipId ||
+      payload.deviceId ||
+      chipFromTopic ||
+      "unknown";
 
-      // === 1) Telemetry insert: per-device collection, raw payload ===
-      const collectionName = `dev_${deviceId}`;
-      const coll = mongoose.connection.collection(collectionName);
+    // always use real current time for DB timestamps
+    const now = new Date();
 
-      await coll.insertOne(payload); // store EXACT payload from device
+    const gps = payload.gps || {};
+    const battery = payload.battery || {};
 
-      console.log(`💾 Stored telemetry in collection ${collectionName}`);
+    // 1️⃣ Save telemetry history
+    const telemetryDoc = {
+      deviceId,
+      timestamp: now,
+      topic,
+      gpsLat: typeof gps.lat === "number" ? gps.lat : undefined,
+      gpsLon: typeof gps.lon === "number" ? gps.lon : undefined,
+      gpsValid:
+        typeof gps.valid === "boolean" ? gps.valid : undefined,
+      batteryPercent:
+        typeof battery.percent === "number" ? battery.percent : undefined,
+      batteryVoltage:
+        typeof battery.voltage === "number" ? battery.voltage : undefined,
+      raw: payload,
+    };
 
-      // === 2) Device metadata update (separate 'devices' collection) ===
-      // (it's okay if metadata is extra; this is server-side, not telemetry)
-      const now = new Date();
-      const gps = payload.gps || null;
+    try {
+      await Telemetry.create(telemetryDoc);
+      console.log(`📝 Saved telemetry for device ${deviceId}`);
+    } catch (err) {
+      console.error("❌ Error saving telemetry:", err);
+      return;
+    }
 
+    // 2️⃣ Update device snapshot (latest state)
+    try {
       const update = {
-        _id: deviceId,
+        type: payload.type || payload.device_type || "unknown",
+        group,
         lastSeen: now,
+
+        // full last payload
+        meta: {
+          ...payload,
+        },
       };
 
-      if (gps && typeof gps.lat === "number" && typeof gps.lon === "number") {
+      // last location
+      if (typeof gps.lat === "number" && typeof gps.lon === "number") {
         update.lastLocation = {
           lat: gps.lat,
           lon: gps.lon,
@@ -106,15 +157,22 @@ function startMqtt() {
         };
       }
 
-      await Device.findByIdAndUpdate(
-        deviceId,
-        update,
-        { upsert: true, new: true }
-      );
+      // last battery
+      if (typeof battery.percent === "number") {
+        update.lastBatteryPercent = battery.percent;
+      }
+      if (typeof battery.voltage === "number") {
+        update.lastBatteryVoltage = battery.voltage;
+      }
 
-      console.log(`📘 Updated metadata for device ${deviceId}`);
+      await Device.findByIdAndUpdate(deviceId, { $set: update }, {
+        upsert: true,
+        new: true,
+      });
+
+      console.log(`📘 Updated device snapshot for ${deviceId}`);
     } catch (err) {
-      console.error("❌ Error handling MQTT message:", err);
+      console.error("❌ Error updating device:", err);
     }
   });
 
