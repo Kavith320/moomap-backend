@@ -8,6 +8,7 @@ const usersRouter = require("./routes/users");
 const cattlesRouter = require("./routes/cattles");
 const geofencesRouter = require("./routes/geofences");
 const collarDataRouter = require("./routes/collarData");
+const adminRouter = require("./routes/admin");
 
 const app = express();
 
@@ -19,6 +20,26 @@ console.log("🚀 Starting IoT backend...");
     console.log("📡 Connecting to MongoDB...");
     await connectDatabase();
     console.log("✔️ MongoDB connection initialized");
+
+    // Seed default admin user if none exists
+    const User = require("./models/User");
+    const bcrypt = require("bcryptjs");
+    const adminMobile = process.env.ADMIN_MOBILE || "0771234567";
+    const existingAdmin = await User.findOne({ role: "admin" });
+    if (!existingAdmin) {
+      const hashed = await bcrypt.hash(process.env.ADMIN_PASSWORD || "admin1234", 10);
+      await User.create({
+        _id: "00000",
+        firstName: "System",
+        lastName: "Administrator",
+        mobile: adminMobile,
+        nicNo: "999999999V",
+        address: "MooMap Server",
+        password: hashed,
+        role: "admin",
+      });
+      console.log(`⚡ Seeded default admin account: ${adminMobile} / admin1234`);
+    }
 
     console.log("🔌 Starting MQTT client...");
     startMqtt();
@@ -47,6 +68,7 @@ app.use("/api/users", usersRouter);
 app.use("/api/cattles", cattlesRouter);
 app.use("/api/geofences", geofencesRouter);
 app.use("/api/collar-data", collarDataRouter);
+app.use("/api/admin", adminRouter);
 
 app.get("/", (req, res) => res.send("OK"));
 

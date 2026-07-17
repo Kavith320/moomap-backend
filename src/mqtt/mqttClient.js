@@ -1,6 +1,8 @@
 // src/mqtt/mqttClient.js
 require("dotenv").config();
 const mqtt = require("mqtt");
+const EventEmitter = require("events");
+const telemetryEmitter = new EventEmitter();
 
 const Device = require("../models/Device");
 const Telemetry = require("../models/Telemetry");
@@ -42,6 +44,8 @@ function parsePayload(rawStr) {
   }
 }
 
+let clientInstance = null;
+
 function startMqtt() {
   const mqttUrl = process.env.MQTT_URL || "mqtt://localhost:1883";
 
@@ -61,6 +65,7 @@ function startMqtt() {
 
   console.log("🔌 Connecting to MQTT broker:", mqttUrl);
   const client = mqtt.connect(mqttUrl, options);
+  clientInstance = client;
 
   client.on("connect", () => {
     console.log("✔️ Connected to MQTT broker");
@@ -171,6 +176,15 @@ function startMqtt() {
       });
 
       console.log(`📘 Updated device snapshot for ${deviceId}`);
+      
+      // Emit event for real-time streaming
+      telemetryEmitter.emit("message", {
+        topic,
+        payloadStr,
+        timestamp: now,
+        deviceId,
+        parsed: payload
+      });
     } catch (err) {
       console.error("❌ Error updating device:", err);
     }
@@ -178,5 +192,11 @@ function startMqtt() {
 
   return client;
 }
+
+startMqtt.isMqttConnected = () => {
+  return clientInstance ? clientInstance.connected : false;
+};
+
+startMqtt.telemetryEmitter = telemetryEmitter;
 
 module.exports = startMqtt;
