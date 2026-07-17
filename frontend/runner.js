@@ -43,6 +43,7 @@ const env = {
 };
 
 const child = spawn('npx', ['next', command], {
+  cwd: __dirname,
   stdio: 'inherit',
   shell: true,
   env
