@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node runner.js dev",
+    "build": "node runner.js build",
+    "start": "node runner.js start",
     "lint": "eslint"
   },
   "dependencies": {
