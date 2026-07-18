@@ -126,7 +126,7 @@ export default function DashboardPage() {
 
     if (token && (isLiveTelemetry || isMapView)) {
       setIsStreaming(true);
-      const url = `http://localhost:3000/api/admin/mqtt-stream?token=${encodeURIComponent(token)}`;
+      const url = `${API_URL}/api/admin/mqtt-stream?token=${encodeURIComponent(token)}`;
       const es = new EventSource(url);
       eventSourceRef.current = es;
 
