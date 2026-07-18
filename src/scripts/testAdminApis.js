@@ -1,6 +1,6 @@
 // src/scripts/testAdminApis.js
 require("dotenv").config();
-const port = process.env.PORT || 3000;
+const port = process.env.BACKEND_PORT || process.env.PORT || 3000;
 const BASE_URL = `http://localhost:${port}`;
 
 async function runTests() {
