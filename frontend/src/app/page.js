@@ -13,7 +13,14 @@ import {
   Trash2,
   Zap,
   LogOut,
-  MapPin
+  MapPin,
+  Server,
+  Globe,
+  Cloud,
+  Search,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw
 } from "lucide-react";
 
 export default function DashboardPage() {
@@ -62,6 +69,23 @@ export default function DashboardPage() {
   const [deviceModal, setDeviceModal] = useState({ active: false, mode: "create", data: null });
   const [simulateModal, setSimulateModal] = useState({ active: false, deviceId: "" });
   const [jsonModal, setJsonModal] = useState({ active: false, data: null });
+
+  // MQTT Config Modal States
+  const [showMqttModal, setShowMqttModal] = useState(false);
+  const [mqttConfigForm, setMqttConfigForm] = useState({
+    protocol: "mqtt",
+    host: "localhost",
+    port: 1883,
+    path: "/mqtt",
+    topic: "cc/+/payload",
+    username: "",
+    password: "",
+    rejectUnauthorized: true,
+  });
+  const [mqttTestResult, setMqttTestResult] = useState(null);
+  const [mqttSaveMsg, setMqttSaveMsg] = useState("");
+  const [isSavingMqtt, setIsSavingMqtt] = useState(false);
+  const [isTestingMqtt, setIsTestingMqtt] = useState(false);
 
   // Form Field States
   const [userForm, setUserForm] = useState({
@@ -408,6 +432,66 @@ export default function DashboardPage() {
     const data = await res.json();
     setDbStatus(data.health.database);
     setMqttStatus(data.health.mqtt);
+  };
+
+  const loadMqttConfig = async () => {
+    setMqttTestResult(null);
+    setMqttSaveMsg("");
+    const res = await apiFetch("/api/admin/mqtt-config");
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data.activeConfig) {
+        setMqttConfigForm({
+          protocol: data.activeConfig.protocol || "mqtt",
+          host: data.activeConfig.host || "localhost",
+          port: data.activeConfig.port || 1883,
+          path: data.activeConfig.path || "/mqtt",
+          topic: data.activeConfig.topic || "cc/+/payload",
+          username: data.activeConfig.username || "",
+          password: data.activeConfig.password || "",
+          rejectUnauthorized: data.activeConfig.rejectUnauthorized !== false,
+        });
+      }
+      setMqttStatus(data.isConnected ? "connected" : "disconnected");
+    }
+  };
+
+  const handleTestMqttConnection = async () => {
+    setMqttTestResult({ loading: true, message: "Testing connection..." });
+    setIsTestingMqtt(true);
+    const res = await apiFetch("/api/admin/mqtt-config/test", {
+      method: "POST",
+      body: JSON.stringify(mqttConfigForm),
+    });
+    setIsTestingMqtt(false);
+    if (res) {
+      const data = await res.json();
+      if (res.ok) {
+        setMqttTestResult({ success: true, message: data.message });
+      } else {
+        setMqttTestResult({ success: false, message: `Connection Failed: ${data.error || "Unknown error"}` });
+      }
+    } else {
+      setMqttTestResult({ success: false, message: "Connection Failed to backend API" });
+    }
+  };
+
+  const handleSaveMqttConfig = async (e) => {
+    e.preventDefault();
+    setMqttSaveMsg({ loading: true, message: "Saving and reconnecting backend MQTT client..." });
+    setIsSavingMqtt(true);
+    const res = await apiFetch("/api/admin/mqtt-config", {
+      method: "POST",
+      body: JSON.stringify(mqttConfigForm),
+    });
+    setIsSavingMqtt(false);
+    if (res && res.ok) {
+      setMqttSaveMsg({ success: true, message: "MQTT Broker reconnected & saved successfully!" });
+      loadHealth();
+    } else {
+      const data = res ? await res.json() : {};
+      setMqttSaveMsg({ success: false, message: `Save Failed: ${data.error || "Failed to update configuration"}` });
+    }
   };
 
   const loadTabContent = (tabId) => {
@@ -773,6 +857,16 @@ export default function DashboardPage() {
               <span className={`status-badge ${mqttStatus === "connected" ? "online" : "offline"}`}>
                 <span className="status-dot"></span> MQTT: {mqttStatus.toUpperCase()}
               </span>
+              <button
+                className="btn btn-outline btn-sm"
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px", marginLeft: "10px", padding: "4px 10px", fontSize: "0.82rem" }}
+                onClick={() => {
+                  loadMqttConfig();
+                  setShowMqttModal(true);
+                }}
+              >
+                <Radio size={14} /> MQTT Settings
+              </button>
             </div>
           </div>
         </header>
@@ -1577,6 +1671,236 @@ export default function DashboardPage() {
             <div className="modal-footer">
               <button onClick={() => setJsonModal({ active: false, data: null })} className="btn btn-secondary">Close</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== CLEAN THEME-ALIGNED MQTT CONFIG MODAL ==================== */}
+      {showMqttModal && (
+        <div className="modal active">
+          <div className="modal-content" style={{ maxWidth: "560px" }}>
+            <div className="modal-header">
+              <h2 style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Radio size={20} style={{ color: "var(--primary)" }} /> MQTT Broker Settings
+              </h2>
+              <span onClick={() => setShowMqttModal(false)} className="close-modal">&times;</span>
+            </div>
+            <form onSubmit={handleSaveMqttConfig}>
+              <div className="modal-body">
+                
+                {/* Quick Setup Presets */}
+                <div className="input-group" style={{ marginBottom: "16px" }}>
+                  <label style={{ fontSize: "0.82rem", fontWeight: "600", color: "var(--text-muted)", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Zap size={14} style={{ color: "var(--primary)" }} /> Quick Setup Presets (One-Click Config)
+                  </label>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setMqttConfigForm({ ...mqttConfigForm, protocol: "mqtt", host: "localhost", port: 1883, path: "/mqtt" })}
+                      style={{ padding: "6px 12px", fontSize: "0.82rem", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                    >
+                      <Server size={14} /> Localhost
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setMqttConfigForm({ ...mqttConfigForm, protocol: "mqtt", host: "broker.emqx.io", port: 1883, path: "/mqtt" })}
+                      style={{ padding: "6px 12px", fontSize: "0.82rem", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                    >
+                      <Globe size={14} /> EMQX Public
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setMqttConfigForm({ ...mqttConfigForm, protocol: "mqtt", host: "broker.hivemq.com", port: 1883, path: "/mqtt" })}
+                      style={{ padding: "6px 12px", fontSize: "0.82rem", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                    >
+                      <Cloud size={14} /> HiveMQ Public
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setMqttConfigForm({ ...mqttConfigForm, protocol: "mqtt", host: "test.mosquitto.org", port: 1883, path: "/mqtt" })}
+                      style={{ padding: "6px 12px", fontSize: "0.82rem", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                    >
+                      <Server size={14} /> Mosquitto Test
+                    </button>
+                  </div>
+                </div>
+
+                {/* Protocol Selector */}
+                <div className="input-group">
+                  <label>Connection Protocol & Encryption</label>
+                  <select
+                    value={mqttConfigForm.protocol}
+                    onChange={(e) => {
+                      const proto = e.target.value;
+                      let defaultPort = 1883;
+                      if (proto === "mqtts") defaultPort = 8883;
+                      if (proto === "ws") defaultPort = 8083;
+                      if (proto === "wss") defaultPort = 8084;
+                      setMqttConfigForm({ ...mqttConfigForm, protocol: proto, port: defaultPort });
+                    }}
+                    required
+                  >
+                    <option value="mqtt">mqtt:// (Standard Unencrypted TCP - Default 1883)</option>
+                    <option value="mqtts">mqtts:// (Encrypted SSL/TLS TCP - Default 8883)</option>
+                    <option value="ws">ws:// (Unencrypted WebSockets - Default 8083)</option>
+                    <option value="wss">wss:// (Encrypted Secure WebSockets - Default 8084)</option>
+                  </select>
+                </div>
+
+                {/* Host & Port */}
+                <div className="form-row" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px" }}>
+                  <div className="input-group">
+                    <label>Broker Host / IP</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. broker.hivemq.com or localhost"
+                      value={mqttConfigForm.host}
+                      onChange={(e) => setMqttConfigForm({ ...mqttConfigForm, host: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>Port</label>
+                    <input
+                      type="number"
+                      placeholder="1883"
+                      value={mqttConfigForm.port}
+                      onChange={(e) => setMqttConfigForm({ ...mqttConfigForm, port: Number(e.target.value) })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* WebSocket Path */}
+                {(mqttConfigForm.protocol === "ws" || mqttConfigForm.protocol === "wss") && (
+                  <div className="input-group">
+                    <label>WebSocket Path</label>
+                    <input
+                      type="text"
+                      placeholder="/mqtt"
+                      value={mqttConfigForm.path || "/mqtt"}
+                      onChange={(e) => setMqttConfigForm({ ...mqttConfigForm, path: e.target.value })}
+                    />
+                  </div>
+                )}
+
+                {/* Topic */}
+                <div className="input-group">
+                  <label>Telemetry Subscribe Topic</label>
+                  <input
+                    type="text"
+                    placeholder="cc/+/payload"
+                    value={mqttConfigForm.topic}
+                    onChange={(e) => setMqttConfigForm({ ...mqttConfigForm, topic: e.target.value })}
+                    required
+                  />
+                </div>
+
+                {/* Username & Password */}
+                <div className="form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div className="input-group">
+                    <label>Username (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="Username"
+                      value={mqttConfigForm.username}
+                      onChange={(e) => setMqttConfigForm({ ...mqttConfigForm, username: e.target.value })}
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>Password (Optional)</label>
+                    <input
+                      type="password"
+                      placeholder="Password"
+                      value={mqttConfigForm.password}
+                      onChange={(e) => setMqttConfigForm({ ...mqttConfigForm, password: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                {/* SSL Verification Checkbox */}
+                {(mqttConfigForm.protocol === "mqtts" || mqttConfigForm.protocol === "wss") && (
+                  <div className="input-group" style={{ marginTop: "4px" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "normal" }}>
+                      <input
+                        type="checkbox"
+                        checked={mqttConfigForm.rejectUnauthorized}
+                        onChange={(e) => setMqttConfigForm({ ...mqttConfigForm, rejectUnauthorized: e.target.checked })}
+                      />
+                      Verify SSL Certificate (Uncheck for self-signed certificates)
+                    </label>
+                  </div>
+                )}
+
+                {/* Status Banners */}
+                {mqttTestResult && (
+                  <div style={{
+                    marginTop: "12px",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    fontSize: "0.85rem",
+                    fontWeight: "500",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    background: mqttTestResult.success ? "rgba(46, 204, 113, 0.12)" : mqttTestResult.loading ? "rgba(244, 180, 0, 0.12)" : "rgba(229, 57, 53, 0.12)",
+                    color: mqttTestResult.success ? "#27ae60" : mqttTestResult.loading ? "#d35400" : "#c0392b",
+                    border: mqttTestResult.success ? "1px solid rgba(46, 204, 113, 0.3)" : mqttTestResult.loading ? "1px solid rgba(244, 180, 0, 0.3)" : "1px solid rgba(229, 57, 53, 0.3)"
+                  }}>
+                    {mqttTestResult.success && <CheckCircle2 size={16} />}
+                    {mqttTestResult.loading && <RefreshCw size={16} className="spin" />}
+                    {!mqttTestResult.success && !mqttTestResult.loading && <AlertCircle size={16} />}
+                    <span>{mqttTestResult.message}</span>
+                  </div>
+                )}
+
+                {mqttSaveMsg && (
+                  <div style={{
+                    marginTop: "12px",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    fontSize: "0.85rem",
+                    fontWeight: "500",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    background: mqttSaveMsg.success ? "rgba(46, 204, 113, 0.12)" : mqttSaveMsg.loading ? "rgba(244, 180, 0, 0.12)" : "rgba(229, 57, 53, 0.12)",
+                    color: mqttSaveMsg.success ? "#27ae60" : mqttSaveMsg.loading ? "#d35400" : "#c0392b",
+                    border: mqttSaveMsg.success ? "1px solid rgba(46, 204, 113, 0.3)" : mqttSaveMsg.loading ? "1px solid rgba(244, 180, 0, 0.3)" : "1px solid rgba(229, 57, 53, 0.3)"
+                  }}>
+                    {mqttSaveMsg.success && <CheckCircle2 size={16} />}
+                    {mqttSaveMsg.loading && <RefreshCw size={16} className="spin" />}
+                    {!mqttSaveMsg.success && !mqttSaveMsg.loading && <AlertCircle size={16} />}
+                    <span>{mqttSaveMsg.message}</span>
+                  </div>
+                )}
+
+              </div>
+
+              <div className="modal-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={handleTestMqttConnection}
+                  disabled={isTestingMqtt}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <Search size={14} /> {isTestingMqtt ? "Testing..." : "Test Connection"}
+                </button>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button type="button" className="btn btn-outline" onClick={() => setShowMqttModal(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={isSavingMqtt}>
+                    {isSavingMqtt ? "Saving..." : "Save & Reconnect"}
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -4,9 +4,11 @@ const Cattle = require("../models/Cattle");
 const Device = require("../models/Device");
 const Geofence = require("../models/Geofence");
 const Telemetry = require("../models/Telemetry");
+const MqttConfig = require("../models/MqttConfig");
 const startMqtt = require("../mqtt/mqttClient");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const mqtt = require("mqtt");
 
 // ==================== STATISTICS ====================
 exports.getStats = async (req, res) => {
@@ -707,3 +709,115 @@ exports.getMapMarkers = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch map markers" });
   }
 };
+
+// ==================== MQTT BROKER CONFIGURATION ====================
+exports.getMqttConfig = async (req, res) => {
+  try {
+    const config = await MqttConfig.findOne().sort({ updatedAt: -1 });
+    const status = typeof startMqtt.getStatus === "function" ? startMqtt.getStatus() : { connected: false, config: null };
+    res.json({
+      activeConfig: config || status.config,
+      isConnected: status.connected,
+    });
+  } catch (err) {
+    console.error("Error getting MQTT config:", err);
+    res.status(500).json({ error: "Failed to get MQTT configuration" });
+  }
+};
+
+exports.updateMqttConfig = async (req, res) => {
+  try {
+    const { protocol, host, port, path, topic, username, password, rejectUnauthorized } = req.body;
+
+    if (!host || !port) {
+      return res.status(400).json({ error: "Host and Port are required fields" });
+    }
+
+    let config = await MqttConfig.findOne();
+    if (!config) {
+      config = new MqttConfig();
+    }
+
+    config.protocol = protocol || "mqtt";
+    config.host = host;
+    config.port = Number(port);
+    config.path = path || "/mqtt";
+    config.topic = topic || "cc/+/payload";
+    config.username = username || "";
+    if (password !== undefined) {
+      config.password = password;
+    }
+    config.rejectUnauthorized = rejectUnauthorized !== false;
+    config.updatedAt = new Date();
+
+    await config.save();
+
+    // Reconnect backend MQTT client live with new settings
+    await startMqtt(config.toObject());
+
+    res.json({
+      message: "MQTT Broker configuration updated & live client reconnected!",
+      config,
+    });
+  } catch (err) {
+    console.error("Error updating MQTT config:", err);
+    res.status(500).json({ error: "Failed to update MQTT configuration: " + err.message });
+  }
+};
+
+exports.testMqttConfig = (req, res) => {
+  try {
+    const { protocol, host, port, path, username, password, rejectUnauthorized } = req.body;
+
+    if (!host || !port) {
+      return res.status(400).json({ error: "Host and Port are required" });
+    }
+
+    const proto = protocol || "mqtt";
+    let url = `${proto}://${host}:${port}`;
+    if (proto === "ws" || proto === "wss") {
+      const wsPath = path ? (path.startsWith("/") ? path : `/${path}`) : "/mqtt";
+      url += wsPath;
+    }
+
+    console.log("🔍 Testing temporary connection to MQTT broker:", url);
+
+    const testClient = mqtt.connect(url, {
+      username: username || undefined,
+      password: password || undefined,
+      rejectUnauthorized: rejectUnauthorized !== false,
+      connectTimeout: 7000,
+    });
+
+    let responded = false;
+
+    testClient.on("connect", () => {
+      if (!responded) {
+        responded = true;
+        testClient.end(true);
+        res.json({ success: true, message: `Successfully connected to MQTT broker [${url}]` });
+      }
+    });
+
+    testClient.on("error", (err) => {
+      if (!responded) {
+        responded = true;
+        testClient.end(true);
+        res.status(400).json({ success: false, error: err.message || "Connection failed" });
+      }
+    });
+
+    // Timeout fallback
+    setTimeout(() => {
+      if (!responded) {
+        responded = true;
+        testClient.end(true);
+        res.status(408).json({ success: false, error: "Connection attempt timed out (7s)" });
+      }
+    }, 7500);
+  } catch (err) {
+    console.error("Error testing MQTT connection:", err);
+    res.status(500).json({ error: "Failed to test MQTT connection: " + err.message });
+  }
+};
+

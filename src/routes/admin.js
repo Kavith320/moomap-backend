@@ -41,4 +41,9 @@ router.get("/mqtt-stream", adminController.getMqttStream);
 // Map Markers Endpoint (Aggregated Locations)
 router.get("/map-markers", adminController.getMapMarkers);
 
+// MQTT Broker Configuration Routes
+router.get("/mqtt-config", adminController.getMqttConfig);
+router.post("/mqtt-config", adminController.updateMqttConfig);
+router.post("/mqtt-config/test", adminController.testMqttConfig);
+
 module.exports = router;
