@@ -108,8 +108,9 @@ async function startMqtt(customConfig = null) {
       process.env.MQTT_CLIENT_ID ||
       "moomap-backend-" + Math.random().toString(16).slice(2, 10),
     clean: true,
+    connectTimeout: 10000,
     rejectUnauthorized: config.rejectUnauthorized !== false,
-    reconnectPeriod: 5000,
+    reconnectPeriod: 10000,
   };
 
   if (config.username) {
