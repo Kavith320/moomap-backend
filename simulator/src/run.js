@@ -38,16 +38,25 @@ function arg(name) {
   return hit ? hit.split("=").slice(1).join("=") : null;
 }
 
-function loadState() {
-  if (!fs.existsSync(cfg.stateFile)) {
-    console.error("✖ herd.json not found. Run `npm run setup` first.");
-    process.exit(1);
+// Under pm2 a missing herd.json would mean an endless crash/restart loop, so wait for it instead.
+async function loadState() {
+  let warned = false;
+  while (!fs.existsSync(cfg.stateFile)) {
+    if (!process.stdin.isTTY) {
+      if (!warned) console.error("✖ herd.json not found. Run `npm run setup`; waiting for it…");
+      warned = true;
+      await new Promise((r) => setTimeout(r, 10000));
+    } else {
+      console.error("✖ herd.json not found. Run `npm run setup` first.");
+      process.exit(1);
+    }
   }
+  if (warned) console.log("✔ herd.json found, starting");
   return JSON.parse(fs.readFileSync(cfg.stateFile, "utf8"));
 }
 
 async function main() {
-  const state = loadState();
+  const state = await loadState();
   const rnd = createRandom(cfg.seed + 1);
   const cows = state.cows.map((c) => new Cow({ ...c, x: c.home.x, y: c.home.y }, rnd));
   const herd = new Herd(cows, state.pasture);

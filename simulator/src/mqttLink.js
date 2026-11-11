@@ -17,7 +17,15 @@ function connectMqtt(cfg, log = console.log) {
     log(`✔ MQTT connected: ${cfg.mqtt.url}`);
   });
   client.on("error", (err) => {
-    if (!warned) log(`✖ MQTT error: ${err.message}`);
+    if (!warned) {
+      log(`✖ MQTT error: ${err.message}`);
+      if (/not authori[sz]ed|bad user ?name or password/i.test(err.message)) {
+        log(
+          `  → The broker rejected user "${cfg.mqtt.username || "(none)"}"` +
+            `${cfg.mqtt.password ? "" : " with an EMPTY password"}. Check MQTT_USERNAME / MQTT_PASSWORD in simulator/.env.`
+        );
+      }
+    }
     warned = true;
   });
   client.on("offline", () => log("… MQTT offline, retrying"));
