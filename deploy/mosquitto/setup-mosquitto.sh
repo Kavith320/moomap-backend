@@ -21,13 +21,14 @@ for u in backend simulator collar; do
     echo "MQTT user $u password: $pw"
   fi
 done
-install -m 0640 -o root -g mosquitto acl /etc/mosquitto/acl
-chown root:mosquitto /etc/mosquitto/passwd && chmod 0640 /etc/mosquitto/passwd
+# Mosquitto 2.x wants these owned by mosquitto, group root, not readable by others
+install -m 0600 -o mosquitto -g root acl /etc/mosquitto/acl
+chown mosquitto:root /etc/mosquitto/passwd && chmod 0600 /etc/mosquitto/passwd
 
 rm -f /etc/mosquitto/conf.d/default.conf
 install -m 0644 moomap.conf /etc/mosquitto/conf.d/moomap.conf
 if [ ! -f /etc/mosquitto/conf.d/bridge-external.conf ]; then
-  install -m 0640 -o root -g mosquitto bridge-external.conf /etc/mosquitto/conf.d/bridge-external.conf
+  install -m 0600 -o mosquitto -g root bridge-external.conf /etc/mosquitto/conf.d/bridge-external.conf
 fi
 
 systemctl restart mosquitto
