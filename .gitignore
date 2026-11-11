@@ -2,3 +2,6 @@ node_modules/
 .env
 *.log
 .DS_Store
+
+# Local-only server notes (repo is public)
+SERVER_REPORT.md

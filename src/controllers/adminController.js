@@ -9,6 +9,22 @@ const startMqtt = require("../mqtt/mqttClient");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const mqtt = require("mqtt");
+const Alert = require("../models/Alert");
+const { processTelemetry } = require("../services/telemetryProcessor");
+const { buildFilter, listWithCursor } = require("./alertsController");
+
+// ==================== ALERTS (all users) ====================
+// GET /api/admin/alerts?userId=&unread=true&type=&cattleId=&deviceId=&limit=&before=
+exports.getAllAlerts = async (req, res) => {
+  try {
+    const filter = buildFilter(req.query);
+    if (req.query.userId) filter.userId = String(req.query.userId);
+    await listWithCursor(filter, req.query, res);
+  } catch (err) {
+    console.error("Error fetching alerts:", err);
+    res.status(500).json({ error: "Failed to fetch alerts" });
+  }
+};
 
 // ==================== STATISTICS ====================
 exports.getStats = async (req, res) => {
@@ -614,6 +630,16 @@ exports.simulateTelemetry = async (req, res) => {
     };
 
     await Device.findByIdAndUpdate(deviceId, { $set: update }, { new: true });
+
+    // 3️⃣ Run the same alert pipeline as real MQTT messages
+    await processTelemetry({
+      deviceId,
+      timestamp: now,
+      lat: payload.gps.lat,
+      lon: payload.gps.lon,
+      gpsValid: payload.gps.valid,
+      batteryPercent: payload.battery.percent,
+    });
 
     res.json({ message: "Telemetry simulated and saved successfully", telemetry });
   } catch (err) {

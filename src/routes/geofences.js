@@ -5,6 +5,7 @@ const { verifyToken } = require("../middleware/auth");
 
 // All routes require login
 router.get("/", verifyToken, geofencesController.getAllGeofences);
+router.get("/status", verifyToken, geofencesController.getGeofenceStatus); // before /:fenceId
 router.get("/:fenceId", verifyToken, geofencesController.getGeofenceById);
 router.post("/", verifyToken, geofencesController.createGeofence);
 router.put("/:fenceId", verifyToken, geofencesController.updateGeofence);

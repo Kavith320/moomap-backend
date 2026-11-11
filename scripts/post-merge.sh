@@ -57,7 +57,11 @@ fi
 
 # Restart frontend if needed
 if [ "$RESTART_FRONTEND" = true ]; then
-  echo -e "\x1b[36m[Git Hook]\x1b[0m Frontend changes detected. Restarting frontend PM2 process..."
+  # `next start` serves the last build, so rebuild first. If the build fails, set -e stops here
+  # and the currently running frontend keeps serving the previous build.
+  echo -e "\x1b[36m[Git Hook]\x1b[0m Frontend changes detected. Building frontend..."
+  npm run build --prefix frontend
+  echo -e "\x1b[36m[Git Hook]\x1b[0m Restarting frontend PM2 process..."
   pm2 restart moomap-frontend || pm2 restart frontend || echo "⚠️ Failed to restart frontend PM2 process"
 fi
 

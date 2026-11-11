@@ -1,11 +1,97 @@
 // src/controllers/geofencesController.js
 const mongoose = require("mongoose");
 const Geofence = require("../models/Geofence");
+const Cattle = require("../models/Cattle");
+const FenceState = require("../models/FenceState");
+const { validatePolygon } = require("../services/geo");
 
 // Helper to get userId from token
 function getUserId(req) {
   return String(req.user.userId);
 }
+
+// Validates polygon / cattleIds / enabled from a create or update body.
+// Returns an error message, or null when valid. An empty polygon is allowed (draft fence).
+async function validateFenceInput(userId, body) {
+  if ("polygon" in body) {
+    if (!Array.isArray(body.polygon)) return "polygon must be an array";
+    if (body.polygon.length > 0) {
+      const err = validatePolygon(body.polygon);
+      if (err) return err;
+    }
+  }
+
+  if ("enabled" in body && typeof body.enabled !== "boolean") {
+    return "enabled must be a boolean";
+  }
+
+  if ("cattleIds" in body) {
+    const ids = body.cattleIds;
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
+      return "cattleIds must be an array of strings";
+    }
+    const unique = [...new Set(ids)];
+    const owned = await Cattle.find({ _id: { $in: unique }, userId }, { _id: 1 }).lean();
+    if (owned.length !== unique.length) {
+      const ownedSet = new Set(owned.map((c) => c._id));
+      const missing = unique.filter((id) => !ownedSet.has(id));
+      return `Unknown cattleIds: ${missing.join(", ")}`;
+    }
+  }
+
+  return null;
+}
+
+// Forget inside/outside status for a fence so the next reading re-evaluates from scratch.
+function resetFenceState(userId, fenceId) {
+  return FenceState.updateMany({ userId }, { $unset: { [`fences.${fenceId}`]: "" } });
+}
+
+// 🔹 GET /api/geofences/status
+// For each of the user's fences: which assigned cattle are inside / outside right now.
+exports.getGeofenceStatus = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const [doc, states, cattle] = await Promise.all([
+      Geofence.findOne({ userId }).lean(),
+      FenceState.find({ userId }).lean(),
+      Cattle.find({ userId }, { name: 1, collarId: 1 }).lean(),
+    ]);
+
+    const stateByCattle = new Map(states.map((s) => [s._id, s]));
+    const cattleById = new Map(cattle.map((c) => [c._id, c]));
+
+    const result = ((doc && doc.geofences) || []).map((fence) => {
+      const fenceId = String(fence._id);
+      const members = (fence.cattleIds || []).map((cattleId) => {
+        const c = cattleById.get(cattleId);
+        const s = stateByCattle.get(cattleId);
+        const fs = s && s.fences && s.fences[fenceId];
+        return {
+          cattleId,
+          name: c ? c.name : undefined,
+          collarId: c ? c.collarId : undefined,
+          status: (fs && fs.status) || "unknown",
+          lastLocation: s ? s.lastLocation : null,
+        };
+      });
+
+      return {
+        fenceId,
+        name: fence.name,
+        enabled: fence.enabled !== false,
+        cattle: members,
+        insideCount: members.filter((m) => m.status === "inside").length,
+        outsideCount: members.filter((m) => m.status === "outside").length,
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error("Error fetching geofence status:", err);
+    res.status(500).json({ message: "Failed to fetch geofence status" });
+  }
+};
 
 // 🔹 GET /api/geofences
 // Return all geofences for the logged-in user
@@ -65,8 +151,9 @@ exports.createGeofence = async (req, res) => {
       cattleIds,
     } = req.body;
 
-    if (polygon && !Array.isArray(polygon)) {
-      return res.status(400).json({ message: "polygon must be an array" });
+    const validationError = await validateFenceInput(userId, req.body);
+    if (validationError) {
+      return res.status(400).json({ message: validationError });
     }
 
     const newFence = {
@@ -123,6 +210,11 @@ exports.updateGeofence = async (req, res) => {
       return res.status(404).json({ message: "Geofence not found" });
     }
 
+    const validationError = await validateFenceInput(userId, req.body);
+    if (validationError) {
+      return res.status(400).json({ message: validationError });
+    }
+
     const allowedFields = ["name", "enabled", "polygon", "cattleIds"];
 
     for (const key of allowedFields) {
@@ -134,6 +226,11 @@ exports.updateGeofence = async (req, res) => {
     fence.updatedAt = new Date();
 
     await doc.save();
+
+    // Shape changed: previous inside/outside status is no longer meaningful
+    if ("polygon" in req.body) {
+      await resetFenceState(userId, fenceId);
+    }
 
     res.json(fence);
   } catch (err) {
@@ -168,6 +265,7 @@ exports.deleteGeofence = async (req, res) => {
     fence.deleteOne(); // remove from array
 
     await doc.save();
+    await resetFenceState(userId, fenceId);
 
     res.json({ message: "Geofence deleted" });
   } catch (err) {

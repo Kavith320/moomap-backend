@@ -92,6 +92,7 @@ exports.loginUser = async (req, res) => {
         firstName: user.firstName,
         lastName: user.lastName,
         mobile: user.mobile,
+        role: user.role,
       },
     });
   } catch (err) {

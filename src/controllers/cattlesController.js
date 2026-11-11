@@ -1,5 +1,13 @@
 const Cattle = require("../models/Cattle");
 const Device = require("../models/Device");
+const FenceState = require("../models/FenceState");
+
+// A collar may only be linked to one cattle; otherwise its location and alerts
+// would be visible to whoever attached it.
+async function collarTaken(collarId, exceptCattleId) {
+  const other = await Cattle.findOne({ collarId, _id: { $ne: exceptCattleId } }, { _id: 1 }).lean();
+  return Boolean(other);
+}
 
 // 🔵 GET ALL CATTLE
 exports.getAllCattles = async (req, res) => {
@@ -67,6 +75,9 @@ exports.createCattle = async (req, res) => {
       if (!deviceExists) {
         return res.status(400).json({ message: "Invalid collarId (not found in collar/device table)" });
       }
+      if (await collarTaken(collarId, cattleId)) {
+        return res.status(409).json({ message: "collarId is already assigned to another cattle" });
+      }
     }
 
     const cattle = await Cattle.create({
@@ -117,13 +128,23 @@ exports.updateCattle = async (req, res) => {
       return res.status(403).json({ message: "Not authorized or cattle not found" });
     }
 
+    // Empty string / null detaches the collar
+    if ((collarId === "" || collarId === null) && cattle.collarId) {
+      cattle.collarId = undefined;
+      await FenceState.deleteOne({ _id: id });
+    }
+
     // Verify collarId if updated
     if (collarId && collarId !== cattle.collarId) {
       const deviceExists = await Device.findById(collarId);
       if (!deviceExists) {
         return res.status(400).json({ message: "Invalid collarId (not found in collar/device table)" });
       }
+      if (await collarTaken(collarId, id)) {
+        return res.status(409).json({ message: "collarId is already assigned to another cattle" });
+      }
       cattle.collarId = collarId;
+      await FenceState.deleteOne({ _id: id }); // old collar's positions no longer apply
     }
 
     if (name !== undefined) cattle.name = name;
@@ -158,6 +179,7 @@ exports.deleteCattle = async (req, res) => {
     }
 
     await Cattle.findByIdAndDelete(id);
+    await FenceState.deleteOne({ _id: id });
 
     res.status(200).json({ message: "Cattle deleted" });
   } catch (error) {

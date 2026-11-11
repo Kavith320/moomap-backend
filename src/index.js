@@ -9,6 +9,9 @@ const cattlesRouter = require("./routes/cattles");
 const geofencesRouter = require("./routes/geofences");
 const collarDataRouter = require("./routes/collarData");
 const adminRouter = require("./routes/admin");
+const alertsRouter = require("./routes/alerts");
+const meRouter = require("./routes/me");
+const { startAlertMonitor } = require("./services/telemetryProcessor");
 
 const app = express();
 
@@ -43,6 +46,7 @@ console.log("🚀 Starting IoT backend...");
 
     console.log("🔌 Starting MQTT client...");
     startMqtt();
+    startAlertMonitor();
   } catch (err) {
     console.error("❌ Fatal startup error:", err);
     process.exit(1);
@@ -69,6 +73,8 @@ app.use("/api/cattles", cattlesRouter);
 app.use("/api/geofences", geofencesRouter);
 app.use("/api/collar-data", collarDataRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/alerts", alertsRouter);
+app.use("/api/me", meRouter);
 
 app.get("/", (req, res) => res.send("OK"));
 

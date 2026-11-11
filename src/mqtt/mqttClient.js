@@ -7,6 +7,7 @@ const telemetryEmitter = new EventEmitter();
 const Device = require("../models/Device");
 const Telemetry = require("../models/Telemetry");
 const MqttConfig = require("../models/MqttConfig");
+const { processTelemetry } = require("../services/telemetryProcessor");
 
 // Robust JSON parser for payloads like: {\"type\":\"slave\",\"device_id\":\"...\"}
 function parsePayload(rawStr) {
@@ -228,7 +229,18 @@ async function startMqtt(customConfig = null) {
       });
     } catch (err) {
       console.error("❌ Error updating device:", err);
+      return;
     }
+
+    // Geofence / battery / online alerts (never throws)
+    await processTelemetry({
+      deviceId,
+      timestamp: now,
+      lat: telemetryDoc.gpsLat,
+      lon: telemetryDoc.gpsLon,
+      gpsValid: telemetryDoc.gpsValid,
+      batteryPercent: telemetryDoc.batteryPercent,
+    });
   });
 
   return client;

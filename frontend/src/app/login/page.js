@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { getSession, saveSession } from "@/lib/portal";
 
 export default function LoginPage() {
   const [mobile, setMobile] = useState("");
@@ -14,6 +15,8 @@ export default function LoginPage() {
   useEffect(() => {
     if (localStorage.getItem("adminToken")) {
       router.push("/");
+    } else if (getSession()) {
+      router.push("/portal");
     }
   }, [router]);
 
@@ -40,7 +43,14 @@ export default function LoginPage() {
 
       const token = data.token;
 
-      // 2. Verify admin credentials via stats endpoint
+      // 2. Regular users go to the user portal
+      if (data.user && data.user.role && data.user.role !== "admin") {
+        saveSession(token, data.user);
+        router.push("/portal");
+        return;
+      }
+
+      // 3. Verify admin credentials via stats endpoint
       const statsRes = await fetch(`${API_URL}/api/admin/stats`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -48,7 +58,10 @@ export default function LoginPage() {
       });
 
       if (statsRes.status === 403) {
-        throw new Error("Access Denied: You do not have administrative privileges.");
+        // Not an admin (older backend without `role` in the login response)
+        saveSession(token, data.user);
+        router.push("/portal");
+        return;
       }
 
       if (!statsRes.ok) {
@@ -73,8 +86,8 @@ export default function LoginPage() {
             <div className="logo-icon" style={{ display: 'flex', justifyContent: 'center' }}>
               <img src="/logo.png" alt="MooMap Logo" style={{ width: "64px", height: "64px", objectFit: "contain" }} />
             </div>
-            <h1>MooMap Admin</h1>
-            <p>Enter your administrative credentials</p>
+            <h1>MooMap</h1>
+            <p>Sign in with your mobile number</p>
           </div>
 
           <form onSubmit={handleSubmit} className="login-form">

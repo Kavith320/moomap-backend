@@ -93,3 +93,66 @@ Updates the latest state snapshot of the device for efficient status checks.
     *   `lastBatteryVoltage` (Number) - Last battery voltage.
     *   `meta` (Object) - The full last payload received.
     *   `notes` (String) - Optional administrator/user notes.
+
+---
+
+## 4. Geofencing & Alerts
+
+All endpoints require `Authorization: Bearer <token>` and only ever return the caller's own data.
+
+### How it works
+1. A geofence is a polygon (`[{lat, lon}, ...]`, ≥ 3 points) plus the `cattleIds` it applies to. A fence with no `cattleIds` monitors nothing.
+2. Each collar reading (MQTT or `POST /api/admin/devices/:id/telemetry`) is checked against the fences of the cattle wearing that collar.
+3. A status change must hold for `GEOFENCE_CONFIRM_READINGS` (default 2) consecutive readings before an alert fires, so single-point GPS jitter is ignored. A first reading inside a fence is silent; a first confirmed reading outside raises an exit alert.
+4. Readings with `gps.valid === false` or `0,0` coordinates are ignored for geofencing.
+5. A collar can be linked to only one cattle (`409` otherwise).
+
+### Alert types
+| type | severity | when |
+| :--- | :--- | :--- |
+| `geofence_exit` | critical | cattle confirmed outside a fence |
+| `geofence_enter` | info | cattle confirmed back inside |
+| `low_battery` | warning | battery ≤ `LOW_BATTERY_PERCENT` (default 20). Re-arms after rising 5% above it |
+| `device_offline` | warning | no data for `OFFLINE_AFTER_MINUTES` (default 60), checked every minute |
+| `device_online` | info | first reading after an offline alert |
+
+Alert object:
+```json
+{
+  "alertId": "665f...", "userId": "12345", "cattleId": "C1", "cattleName": "Bessie",
+  "deviceId": "DEV1", "type": "geofence_exit", "severity": "critical",
+  "title": "Bessie left Pasture", "message": "Bessie was detected outside the geofence \"Pasture\".",
+  "fenceId": "665e...", "fenceName": "Pasture", "location": { "lat": 6.95, "lon": 79.865 },
+  "read": false, "createdAt": "2026-11-12T10:00:00.000Z"
+}
+```
+
+### Geofence endpoints
+| Method | Path | Notes |
+| :--- | :--- | :--- |
+| GET | `/api/geofences` | List my fences |
+| GET | `/api/geofences/status` | Per fence: each assigned cattle's `status` (`inside`/`outside`/`unknown`), `lastLocation`, `insideCount`, `outsideCount` |
+| GET | `/api/geofences/:fenceId` | One fence |
+| POST | `/api/geofences` | `{ name, enabled, polygon, cattleIds }`. `400` for an invalid polygon or cattle you don't own |
+| PUT | `/api/geofences/:fenceId` | Partial update. Changing `polygon` resets inside/outside status |
+| DELETE | `/api/geofences/:fenceId` | |
+
+### Alert endpoints
+| Method | Path | Notes |
+| :--- | :--- | :--- |
+| GET | `/api/alerts` | Query: `unread=true`, `type=geofence_exit,low_battery`, `cattleId`, `deviceId`, `limit` (≤200, default 50), `before=<ISO>`. Returns `{ alerts, nextBefore }`. Pass `nextBefore` back as `before` for the next page |
+| GET | `/api/alerts/unread-count` | `{ count }` for a badge |
+| PATCH | `/api/alerts/:alertId/read` | Mark one read |
+| POST | `/api/alerts/read-all` | `{ updated }` |
+| DELETE | `/api/alerts/:alertId` | |
+| GET | `/api/alerts/stream?token=<jwt>` | Server-Sent Events. Live `alert` events for the caller only |
+| GET | `/api/admin/alerts` | Admin only. Same filters plus `userId` |
+
+Live alerts in the browser:
+```js
+const es = new EventSource(`${API_URL}/api/alerts/stream?token=${token}`);
+es.addEventListener("alert", (e) => showToast(JSON.parse(e.data)));
+```
+
+### Webhook (SMS / Telegram / WhatsApp / email bridge)
+If `ALERT_WEBHOOK_URL` is set, every alert is POSTed there as JSON (5s timeout, failures are logged and never block ingestion). If `ALERT_WEBHOOK_SECRET` is set, it is sent in the `X-MooMap-Secret` header.

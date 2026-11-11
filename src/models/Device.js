@@ -53,6 +53,12 @@ const DeviceSchema = new mongoose.Schema(
     notes: {
       type: String,
     },
+
+    // alert de-duplication flags (managed by services/telemetryProcessor.js)
+    alertState: {
+      lowBattery: { type: Boolean, default: false },
+      offline: { type: Boolean, default: false },
+    },
   },
   {
     timestamps: true, // createdAt, updatedAt

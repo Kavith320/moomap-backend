@@ -35,6 +35,9 @@ router.get("/geofences", adminController.getAllGeofences);
 // Telemetry History Log Route
 router.get("/telemetries", adminController.getAllTelemetries);
 
+// Alerts across all users
+router.get("/alerts", adminController.getAllAlerts);
+
 // Live Real-Time MQTT Stream Endpoint (SSE)
 router.get("/mqtt-stream", adminController.getMqttStream);
 
