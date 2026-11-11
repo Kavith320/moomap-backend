@@ -14,6 +14,7 @@ const { createRandom } = require("./random");
 const { Cow, Herd } = require("./herd");
 const { Network, radioSummary } = require("./network");
 const { connectMqtt } = require("./mqttLink");
+const { createApi } = require("./backendApi");
 
 // at: seconds after start (real time). `cow` is an index into the slave list, so a
 // scenario never moves the master (which would take the whole herd's uplink with it).
@@ -278,6 +279,26 @@ async function main() {
     }
   };
 
+  // Current photos come from the backend (the farmer may change them in the portal);
+  // herd.json only has what setup uploaded.
+  const photos = new Map(state.cows.map((c) => [c.cattleId, { image: c.image || null, credit: c.imageCredit || null }]));
+  const refreshPhotos = async () => {
+    try {
+      const api = createApi(cfg.backendUrl);
+      const login = await api.post("/api/users/login", { mobile: cfg.user.mobile, password: cfg.user.password });
+      if (!login.ok) return;
+      api.setToken(login.data.token);
+      const list = await api.get("/api/cattles");
+      for (const c of list.data || []) {
+        const id = c._id || c.cattleId;
+        if (photos.has(id)) photos.set(id, { image: c.Image || null, credit: c.imageCredit || null });
+      }
+    } catch {}
+  };
+  let lastPhotoRefresh = Date.now();
+  refreshPhotos();
+  setInterval(refreshPhotos, 60 * 1000).unref();
+
   // JSON snapshot for the control panel
   const snapshot = () => {
     const ll = (p) => {
@@ -299,6 +320,15 @@ async function main() {
       cows: cows.map((c) => {
         const col = net.byId.get(c.collarId);
         return {
+          ...(() => {
+            const ph = photos.get(c.cattleId) || {};
+            const img = ph.image;
+            return {
+              // local uploads go through the /media proxy; external URLs are used directly
+              image: !img ? null : img.startsWith("/media/") ? `media/${img.slice("/media/".length)}` : img,
+              imageCredit: ph.credit || null,
+            };
+          })(),
           name: c.name,
           cattleId: c.cattleId,
           collarId: c.collarId,
@@ -344,6 +374,23 @@ async function main() {
           try {
             if (req.method === "GET" && (url === "/" || url === "/index.html")) {
               return send(200, "text/html; charset=utf-8", fs.readFileSync(panelHtml));
+            }
+            if (req.method === "GET" && url.startsWith("/media/") && !url.includes("..")) {
+              // photos live on the backend; proxy them so the panel only needs this one address
+              return fetch(cfg.backendUrl + url)
+                .then(async (r) => {
+                  if (!r.ok) {
+                    // photo was replaced or removed in the portal: refresh (at most every 5 s)
+                    if (r.status === 404 && Date.now() - lastPhotoRefresh > 5000) {
+                      lastPhotoRefresh = Date.now();
+                      refreshPhotos();
+                    }
+                    return send(r.status, "text/plain", "not found");
+                  }
+                  res.writeHead(200, { "Content-Type": r.headers.get("content-type") || "image/jpeg", "Cache-Control": "max-age=86400" });
+                  res.end(Buffer.from(await r.arrayBuffer()));
+                })
+                .catch(() => send(502, "text/plain", "backend unreachable"));
             }
             if (req.method === "GET" && url === "/api/state") {
               return send(200, "application/json", JSON.stringify(snapshot()));

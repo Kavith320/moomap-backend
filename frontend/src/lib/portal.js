@@ -110,3 +110,34 @@ export function hasLocation(item) {
   const loc = item && item.device && item.device.lastLocation;
   return Boolean(loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon));
 }
+
+// Cattle photos: "/media/..." paths live on the backend; full URLs are used as-is.
+export function mediaUrl(path) {
+  if (!path) return null;
+  if (/^https?:\/\//.test(path)) return path;
+  return API_URL + path;
+}
+
+// Shrink a photo in the browser before upload (phones take 4000px+ photos).
+// Returns a JPEG data URL no larger than maxSide on its longest edge.
+export function resizeImage(file, maxSide = 1024, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type)) return reject(new Error("Choose an image file"));
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read that image"));
+    };
+    img.src = url;
+  });
+}

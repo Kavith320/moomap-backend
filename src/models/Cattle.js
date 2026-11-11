@@ -49,6 +49,17 @@ const CattleSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    // Photo credit when the image needs attribution (e.g. Creative Commons)
+    imageCredit: {
+      type: String,
+      trim: true,
+      maxlength: 300,
+    },
+    imageSourceUrl: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+    },
     userId: {
       type: String,
       required: true,

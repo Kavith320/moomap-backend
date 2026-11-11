@@ -12,6 +12,7 @@ const { makePasture, toLatLon } = require("./geo");
 const { randomPointInside } = require("./herd");
 const { createApi, ensureUser } = require("./backendApi");
 const { connectMqtt } = require("./mqttLink");
+const { fetchPhotoSet, downloadAsDataUrl } = require("./photos");
 
 const NAMES = ["Kiri", "Raththi", "Sudu", "Kalu", "Manel", "Nilu", "Rani", "Lakshmi", "Podi", "Menike", "Tikiri", "Chuti",
   "Somi", "Bindu", "Hema", "Gaya", "Neela", "Pinki", "Thara", "Wasana"];
@@ -19,7 +20,7 @@ const BREEDS = ["Sahiwal", "Jersey", "Friesian", "Local", "Sindhi"];
 const pad = (n) => String(n).padStart(2, "0");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function generateLayout() {
+function generateLayout(origin) {
   const rnd = createRandom(cfg.seed);
   const pasture = makePasture(cfg.herd.pastureRadiusM, rnd);
   const p = cfg.herd.idPrefix;
@@ -44,15 +45,54 @@ function generateLayout() {
       home,
     });
   }
-  return { origin: { lat: cfg.herd.centerLat, lon: cfg.herd.centerLon }, pasture, cows };
+  return { origin, pasture, cows };
+}
+
+async function attachPhotos(api, state, reroll) {
+  const existing = new Map(((await api.get("/api/cattles")).data || []).map((c) => [c._id || c.cattleId, c]));
+  for (const c of state.cows) {
+    const e = existing.get(c.cattleId);
+    if (e && e.Image) Object.assign(c, { image: e.Image, imageCredit: e.imageCredit });
+  }
+  const todo = state.cows.filter((c) => reroll || !(existing.get(c.cattleId) || {}).Image);
+  if (!todo.length) {
+    console.log("✔ Every cow already has a photo (use --photos to pick new ones)");
+    return;
+  }
+  let set;
+  try {
+    set = await fetchPhotoSet();
+  } catch (err) {
+    console.log(`⚠ Skipping photos: could not reach Wikimedia Commons (${err.message})`);
+    return;
+  }
+  // shuffle (seeded by time so --photos gives a new mix), then deal one photo per cow
+  const rnd = createRandom(Date.now());
+  const deck = [...set].sort(() => rnd.next() - 0.5);
+  let done = 0;
+  for (let i = 0; i < todo.length; i++) {
+    const cow = todo[i];
+    const photo = deck[i % deck.length];
+    try {
+      const image = await downloadAsDataUrl(photo.url);
+      const r = await api.post(`/api/cattles/${encodeURIComponent(cow.cattleId)}/image`, {
+        image,
+        credit: photo.credit,
+        sourceUrl: photo.sourceUrl,
+      });
+      if (!r.ok) throw new Error(r.error);
+      cow.image = r.data.Image;
+      cow.imageCredit = r.data.imageCredit;
+      done++;
+    } catch (err) {
+      console.log(`⚠ Photo for ${cow.name} failed: ${err.message}`);
+    }
+  }
+  console.log(`✔ Added photos to ${done} cattle (Wikimedia Commons, Category: Cattle in Sri Lanka)`);
 }
 
 async function main() {
   const fresh = process.argv.includes("--fresh");
-  let state = !fresh && fs.existsSync(cfg.stateFile) ? JSON.parse(fs.readFileSync(cfg.stateFile, "utf8")) : null;
-  if (!state) state = generateLayout();
-  else console.log(`↺ Reusing layout from herd.json (${state.cows.length} cattle). Use --fresh for a new one.`);
-
   console.log(`→ Backend ${cfg.backendUrl}`);
   const health = await fetch(cfg.backendUrl + "/health").catch(() => null);
   if (!health || !health.ok) throw new Error(`Backend not reachable at ${cfg.backendUrl}`);
@@ -60,6 +100,22 @@ async function main() {
   const api = createApi(cfg.backendUrl);
   const { userId } = await ensureUser(api, cfg.user);
   console.log(`✔ Logged in as sim user ${userId}`);
+
+  let state = !fresh && fs.existsSync(cfg.stateFile) ? JSON.parse(fs.readFileSync(cfg.stateFile, "utf8")) : null;
+  if (!state) {
+    // Pasture goes around the farmer's home location (portal → Profile) if one is set
+    const me = await api.get("/api/users/me");
+    const home = me.ok && me.data.homeLocation;
+    const origin = home ? { lat: home.lat, lon: home.lon } : { lat: cfg.herd.centerLat, lon: cfg.herd.centerLon };
+    console.log(
+      home
+        ? `✔ Using the farmer's home location "${home.name || "Farm home"}" (${home.lat}, ${home.lon})`
+        : `ℹ No home location on the farmer's profile; using CENTER_LAT/CENTER_LON (${origin.lat}, ${origin.lon})`
+    );
+    state = generateLayout(origin);
+  } else {
+    console.log(`↺ Reusing layout from herd.json (${state.cows.length} cattle). Use --fresh for a new one.`);
+  }
 
   // 1. Announce every collar over MQTT so the backend registers it as a device
   const link = connectMqtt(cfg);
@@ -122,6 +178,12 @@ async function main() {
   if (!fr.ok) throw new Error(`Geofence: ${fr.error}`);
   state.fenceId = String(fr.data._id);
   console.log(`✔ Geofence "${cfg.herd.fenceName}" ${existing ? "updated" : "created"}`);
+
+  // 4. Photos: a random real photo of Sri Lankan cattle for every cow that has none
+  //    (--photos re-rolls all of them, --no-photos skips this step)
+  if (!process.argv.includes("--no-photos")) {
+    await attachPhotos(api, state, process.argv.includes("--photos"));
+  }
 
   state.user = { userId, mobile: cfg.user.mobile };
   state.updatedAt = new Date().toISOString();

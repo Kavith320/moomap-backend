@@ -148,6 +148,25 @@ exports.updateUser = async (req, res) => {
       user.password = await bcrypt.hash(password, 10);
     }
 
+    // homeLocation: { lat, lon, name? } to set, null to clear
+    if ("homeLocation" in req.body) {
+      const h = req.body.homeLocation;
+      if (h === null) {
+        user.homeLocation = undefined;
+      } else {
+        const lat = Number(h && h.lat);
+        const lon = Number(h && h.lon);
+        if (!h || !Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+          return res.status(400).json({ error: "homeLocation needs valid lat (-90..90) and lon (-180..180)" });
+        }
+        const name = h.name == null ? "" : String(h.name).trim();
+        if (name.length > 80) {
+          return res.status(400).json({ error: "homeLocation name must be 80 characters or less" });
+        }
+        user.homeLocation = { lat, lon, name: name || undefined, updatedAt: new Date() };
+      }
+    }
+
     await user.save();
 
     res.json({ message: "User updated", user });

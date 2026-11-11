@@ -9,5 +9,7 @@ router.get("/:id", verifyToken, cattleController.getCattleById);
 router.post("/", verifyToken, cattleController.createCattle);
 router.put("/:id", verifyToken, cattleController.updateCattle);
 router.delete("/:id", verifyToken, cattleController.deleteCattle);
+router.post("/:id/image", verifyToken, cattleController.uploadCattleImage);
+router.delete("/:id/image", verifyToken, cattleController.deleteCattleImage);
 
 module.exports = router;

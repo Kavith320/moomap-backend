@@ -82,6 +82,8 @@ exports.getOverview = async (req, res) => {
         healthNotes: c.healthNotes,
         farmName: c.farmName,
         Image: c.Image,
+        imageCredit: c.imageCredit,
+        imageSourceUrl: c.imageSourceUrl,
         collarId: c.collarId || null,
         device,
         fences,

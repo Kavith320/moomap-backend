@@ -5,7 +5,7 @@ import LeafletMap from "@/components/portal/LeafletMap";
 import { PageHeader, usePortal } from "@/components/portal/PortalShell";
 
 export default function GeofencesPage() {
-  const { api, toast, alertTick } = usePortal();
+  const { api, toast, alertTick, user } = usePortal();
   const [fences, setFences] = useState(null);
   const [status, setStatus] = useState({}); // fenceId -> status entry
   const [cattle, setCattle] = useState([]);
@@ -94,6 +94,7 @@ export default function GeofencesPage() {
             draft={editor ? editor.polygon : null}
             onMapClick={editor ? addPoint : undefined}
             fitKey={fitKey}
+            home={user && user.homeLocation}
           />
           {editor && (
             <div className="pt-map-hint">

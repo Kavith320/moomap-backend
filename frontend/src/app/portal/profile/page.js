@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { LogOut } from "lucide-react";
+import { LocateFixed, LogOut } from "lucide-react";
+import LocationPicker from "@/components/portal/LocationPicker";
 import { NOTIFY_PREF_KEY, PageHeader, usePortal } from "@/components/portal/PortalShell";
-import { saveUser } from "@/lib/portal";
+import { saveUser, timeAgo } from "@/lib/portal";
 
 const FIELDS = ["firstName", "lastName", "mobile", "gender", "nicNo", "address"];
 
@@ -132,6 +133,8 @@ export default function ProfilePage() {
           </div>
         </form>
 
+        <HomeLocationCard />
+
         <form className="pt-card pt-card-pad" onSubmit={savePassword}>
           <h2 className="pt-card-title">Change password</h2>
           <div className="pt-form-grid">
@@ -170,5 +173,138 @@ export default function ProfilePage() {
         </button>
       </div>
     </>
+  );
+}
+
+// Farm home location: used as the start view for the overview and geofence maps.
+function HomeLocationCard() {
+  const { api, user, setUser, toast } = usePortal();
+  const saved = user && user.homeLocation;
+  const [loc, setLoc] = useState(saved ? { lat: saved.lat, lon: saved.lon } : null);
+  const [name, setName] = useState((saved && saved.name) || "");
+  const [latText, setLatText] = useState(saved ? String(saved.lat) : "");
+  const [lonText, setLonText] = useState(saved ? String(saved.lon) : "");
+  const [saving, setSaving] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [error, setError] = useState("");
+
+  // follow the server copy when it changes (e.g. profile refreshed after load)
+  const savedKey = saved ? `${saved.lat},${saved.lon},${saved.name || ""},${saved.updatedAt}` : "";
+  useEffect(() => {
+    if (!saved) return;
+    setLoc({ lat: saved.lat, lon: saved.lon });
+    setLatText(String(saved.lat));
+    setLonText(String(saved.lon));
+    setName(saved.name || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedKey]);
+
+  const round = (v) => Math.round(v * 1e6) / 1e6;
+  const place = (lat, lon) => {
+    const p = { lat: round(lat), lon: round(lon) };
+    setLoc(p);
+    setLatText(String(p.lat));
+    setLonText(String(p.lon));
+    setError("");
+  };
+
+  const typed = (which) => (e) => {
+    const v = e.target.value;
+    which === "lat" ? setLatText(v) : setLonText(v);
+    const lat = Number(which === "lat" ? v : latText);
+    const lon = Number(which === "lon" ? v : lonText);
+    if (v !== "" && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+      setLoc({ lat, lon });
+    }
+  };
+
+  const useGps = () => {
+    if (!("geolocation" in navigator)) return setError("This browser cannot share its location.");
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        place(pos.coords.latitude, pos.coords.longitude);
+      },
+      (err) => {
+        setLocating(false);
+        setError(err.code === 1 ? "Location permission was denied." : "Could not get your location.");
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  };
+
+  const save = async (homeLocation) => {
+    setSaving(true);
+    setError("");
+    const r = await api("/api/users/me", { method: "PUT", body: { homeLocation } });
+    setSaving(false);
+    if (r.ok) {
+      setUser(r.data.user);
+      saveUser(r.data.user);
+      toast({ title: homeLocation ? "Home location saved" : "Home location removed", severity: "info", duration: 3000 });
+    } else if (!r.authFailed) setError(r.error);
+  };
+
+  const onSave = () => {
+    if (!loc) return setError("Pick a spot on the map first.");
+    save({ lat: loc.lat, lon: loc.lon, name: name.trim() });
+  };
+
+  const onClear = () => {
+    setLoc(null);
+    setLatText("");
+    setLonText("");
+    setName("");
+    if (saved) save(null);
+  };
+
+  const dirty =
+    (loc && (!saved || saved.lat !== loc.lat || saved.lon !== loc.lon || (saved.name || "") !== name.trim())) || false;
+
+  return (
+    <div className="pt-card pt-card-pad">
+      <div className="pt-row-between" style={{ marginBottom: 6 }}>
+        <h2 className="pt-card-title" style={{ margin: 0 }}>
+          Farm home location
+        </h2>
+        {saved && <span className="pt-chip success">Saved {timeAgo(saved.updatedAt)}</span>}
+      </div>
+      <p className="pt-sub" style={{ fontSize: "0.88rem", marginBottom: 12 }}>
+        Where your farm is. Your maps open here, and new geofences start here.
+      </p>
+      <div className="pt-stack">
+        {error && <div className="pt-error">{error}</div>}
+        <LocationPicker value={loc} onChange={place} />
+        <div className="pt-form-grid">
+          <div className="pt-field full">
+            <label htmlFor="home-name">Name</label>
+            <input id="home-name" type="text" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main farm" />
+          </div>
+          <div className="pt-field">
+            <label htmlFor="home-lat">Latitude</label>
+            <input id="home-lat" type="number" step="0.000001" inputMode="decimal" value={latText} onChange={typed("lat")} placeholder="7.290600" />
+          </div>
+          <div className="pt-field">
+            <label htmlFor="home-lon">Longitude</label>
+            <input id="home-lon" type="number" step="0.000001" inputMode="decimal" value={lonText} onChange={typed("lon")} placeholder="80.633700" />
+          </div>
+        </div>
+        <div className="pt-draw-tools">
+          <button type="button" className="pt-btn" onClick={useGps} disabled={locating}>
+            <LocateFixed size={16} /> {locating ? "Locating…" : "Use my current location"}
+          </button>
+          <span style={{ flex: 1 }} />
+          {(saved || loc) && (
+            <button type="button" className="pt-btn pt-btn-danger" onClick={onClear} disabled={saving}>
+              Clear
+            </button>
+          )}
+          <button type="button" className="pt-btn pt-btn-primary" onClick={onSave} disabled={saving || !dirty}>
+            {saving ? "Saving…" : "Save location"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

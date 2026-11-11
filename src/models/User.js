@@ -44,6 +44,19 @@ const UserSchema = new mongoose.Schema(
       enum: ["user", "admin"],
       default: "user",
     },
+    // Farm home location chosen by the user (portal Profile page)
+    homeLocation: {
+      type: new mongoose.Schema(
+        {
+          lat: { type: Number, required: true, min: -90, max: 90 },
+          lon: { type: Number, required: true, min: -180, max: 180 },
+          name: { type: String, trim: true, maxlength: 80 },
+          updatedAt: { type: Date, default: Date.now },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
   },
   {
     timestamps: true,

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BatteryLow, Bell, Crosshair, RefreshCw, ShieldAlert, Wifi } from "lucide-react";
 import HoofPrint from "@/components/portal/HoofPrint";
+import CattlePhoto from "@/components/portal/CattlePhoto";
 import LeafletMap from "@/components/portal/LeafletMap";
 import { PageHeader, usePortal } from "@/components/portal/PortalShell";
 import { COLORS, cattleStatus, hasLocation, timeAgo } from "@/lib/portal";
@@ -140,6 +141,7 @@ export default function OverviewPage() {
                   selectedCattleId={selected}
                   onSelectCattle={setSelected}
                   fitKey={fitKey}
+                  home={user && user.homeLocation}
                 />
                 <div className="pt-map-overlay">
                   <button
@@ -183,7 +185,9 @@ export default function OverviewPage() {
                         disabled={!located}
                         title={located ? "Show on map" : "No location yet"}
                       >
-                        <span className="pt-status-dot" style={{ "--c": COLORS[st.key] }} />
+                        <span style={{ "--c": COLORS[st.key], display: "contents" }}>
+                          <CattlePhoto cattle={c} variant="avatar" />
+                        </span>
                         <span className="pt-cattle-row-main">
                           <strong>{c.name || c.cattleId}</strong>
                           <span className="pt-sub">

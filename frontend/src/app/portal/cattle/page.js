@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { MapPin, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import HoofPrint from "@/components/portal/HoofPrint";
+import CattlePhoto from "@/components/portal/CattlePhoto";
 import Modal from "@/components/portal/Modal";
 import { PageHeader, usePortal } from "@/components/portal/PortalShell";
-import { cattleStatus, hasLocation, timeAgo } from "@/lib/portal";
+import { cattleStatus, hasLocation, mediaUrl, resizeImage, timeAgo } from "@/lib/portal";
 
 const EMPTY = {
   cattleId: "",
@@ -109,6 +110,7 @@ export default function CattlePage() {
           const st = cattleStatus(c);
           return (
             <article key={c.cattleId} className="pt-card pt-cattle-card">
+              <CattlePhoto cattle={c} />
               <div className="pt-cattle-card-head">
                 <div>
                   <h3>{c.name || c.cattleId}</h3>
@@ -159,6 +161,7 @@ export default function CattlePage() {
                     setEditing({
                       mode: "edit",
                       form: Object.fromEntries(Object.keys(EMPTY).map((k) => [k, c[k] ?? ""])),
+                      image: c.Image || null,
                     })
                   }
                 >
@@ -177,6 +180,7 @@ export default function CattlePage() {
         <CattleForm
           mode={editing.mode}
           initial={editing.form}
+          initialImage={editing.image || null}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -188,9 +192,26 @@ export default function CattlePage() {
   );
 }
 
-function CattleForm({ mode, initial, onClose, onSaved }) {
+function CattleForm({ mode, initial, initialImage, onClose, onSaved }) {
   const { api, toast } = usePortal();
   const [form, setForm] = useState(initial);
+  // photo: preview shown in the form; data = new image to upload; remove = delete the current one
+  const [photo, setPhoto] = useState({ preview: mediaUrl(initialImage), data: null, remove: false });
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  const pickPhoto = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoBusy(true);
+    try {
+      const data = await resizeImage(file);
+      setPhoto({ preview: data, data, remove: false });
+    } catch (err) {
+      setError(err.message);
+    }
+    setPhotoBusy(false);
+  };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -222,12 +243,25 @@ function CattleForm({ mode, initial, onClose, onSaved }) {
             body: { ...body, cattleId: form.cattleId.trim(), collarId: body.collarId || undefined },
           })
         : await api(`/api/cattles/${encodeURIComponent(form.cattleId)}`, { method: "PUT", body });
-    setSaving(false);
     if (r.ok) {
-      toast({ title: mode === "create" ? "Cattle added" : "Changes saved", severity: "info", duration: 3000 });
+      const id = encodeURIComponent(mode === "create" ? form.cattleId.trim() : form.cattleId);
+      let photoError = "";
+      if (photo.data) {
+        const p = await api(`/api/cattles/${id}/image`, { method: "POST", body: { image: photo.data } });
+        if (!p.ok && !p.authFailed) photoError = p.error;
+      } else if (photo.remove && initialImage) {
+        await api(`/api/cattles/${id}/image`, { method: "DELETE" });
+      }
+      setSaving(false);
+      if (photoError) {
+        toast({ title: "Saved, but the photo failed", message: photoError, severity: "warning" });
+      } else {
+        toast({ title: mode === "create" ? "Cattle added" : "Changes saved", severity: "info", duration: 3000 });
+      }
       onSaved();
-    } else if (!r.authFailed) {
-      setError(r.error);
+    } else {
+      setSaving(false);
+      if (!r.authFailed) setError(r.error);
     }
   };
 
@@ -248,6 +282,26 @@ function CattleForm({ mode, initial, onClose, onSaved }) {
     >
       <form id="cattle-form" onSubmit={submit} className="pt-form-grid">
         {error && <div className="pt-error full">{error}</div>}
+        <div className="pt-field full">
+          <span className="pt-label">Photo</span>
+          <div className="pt-photo-edit">
+            <div className="pt-photo">
+              {photo.preview ? <img src={photo.preview} alt="Cattle photo preview" /> : <HoofPrint size={36} />}
+            </div>
+            <div className="pt-photo-edit-actions">
+              <label className="pt-btn pt-btn-sm" style={{ cursor: "pointer" }}>
+                {photoBusy ? "Preparing…" : photo.preview ? "Change photo" : "Add photo"}
+                <input type="file" accept="image/*" onChange={pickPhoto} hidden />
+              </label>
+              {photo.preview && (
+                <button type="button" className="pt-btn pt-btn-sm pt-btn-danger" onClick={() => setPhoto({ preview: null, data: null, remove: true })}>
+                  Remove photo
+                </button>
+              )}
+              <small className="pt-sub">JPEG, PNG or WebP. Resized before upload.</small>
+            </div>
+          </div>
+        </div>
         <div className="pt-field">
           <label htmlFor="cf-id">Cattle ID *</label>
           <input id="cf-id" type="text" value={form.cattleId} onChange={set("cattleId")} disabled={mode === "edit"} placeholder="e.g. TAG-0042" />

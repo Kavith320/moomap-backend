@@ -66,7 +66,14 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+// Photo uploads send a base64 image, so they get a larger body limit than everything else
+const jsonSmall = express.json();
+const jsonImage = express.json({ limit: "8mb" });
+app.use((req, res, next) => (/\/image\/?$/.test(req.path) ? jsonImage : jsonSmall)(req, res, next));
+
+// Uploaded media (cattle photos). File names are random, so links can't be guessed.
+const { MEDIA_DIR } = require("./services/media");
+app.use("/media", express.static(MEDIA_DIR, { maxAge: "30d", immutable: true, index: false, fallthrough: true }));
 
 app.use("/api/users", usersRouter);
 app.use("/api/cattles", cattlesRouter);

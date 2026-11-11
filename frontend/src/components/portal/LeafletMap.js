@@ -1,7 +1,7 @@
 "use client";
 // Leaflet map for the user portal. Leaflet itself is loaded globally in app/layout.js (window.L).
 import { useEffect, useRef, useState } from "react";
-import { COLORS, cattleStatus, escapeHtml, hasLocation, timeAgo } from "@/lib/portal";
+import { COLORS, cattleStatus, escapeHtml, hasLocation, mediaUrl, timeAgo } from "@/lib/portal";
 
 const DEFAULT_CENTER = [7.8731, 80.7718]; // Sri Lanka
 const DEFAULT_ZOOM = 8;
@@ -29,6 +29,7 @@ function popupHtml(item) {
     .join("<br/>");
   return `
     <div class="pt-popup">
+      ${item.Image ? `<img class="pt-popup-photo" src="${escapeHtml(mediaUrl(item.Image))}" alt="" />` : ""}
       <div class="pt-popup-title">${escapeHtml(item.name || item.cattleId)}</div>
       <div class="pt-popup-status" style="color:${COLORS[st.key]}">● ${escapeHtml(st.label)}</div>
       <table>
@@ -51,6 +52,7 @@ function popupHtml(item) {
  *  selectedCattleId  fly to + open popup for this cattle
  *  onSelectCattle    (cattleId) => void
  *  fitKey            change this value to re-fit the view to all content
+ *  home              { lat, lon, name } farm home: 🏠 marker, and the start view when nothing else is on the map
  */
 export default function LeafletMap({
   cattle = [],
@@ -61,6 +63,7 @@ export default function LeafletMap({
   selectedCattleId = null,
   onSelectCattle,
   fitKey = 0,
+  home = null,
   className = "",
 }) {
   const elRef = useRef(null);
@@ -159,11 +162,28 @@ export default function LeafletMap({
       bounds.push([lat, lon]);
     }
 
-    if (fittedKeyRef.current !== fitKey && bounds.length) {
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
-      fittedKeyRef.current = fitKey;
+    const hasHome = home && Number.isFinite(home.lat) && Number.isFinite(home.lon);
+    if (hasHome) {
+      L.marker([home.lat, home.lon], {
+        icon: L.divIcon({ className: "pt-home-wrap", html: '<div class="pt-home">🏠</div>', iconSize: [30, 30], iconAnchor: [15, 15] }),
+        interactive: true,
+        keyboard: false,
+        zIndexOffset: -100,
+      })
+        .bindTooltip(escapeHtml(home.name || "Farm home"), { direction: "top", offset: [0, -14] })
+        .addTo(markerLayer);
     }
-  }, [ready, cattle, fences, highlightFenceId, fitKey]);
+
+    if (fittedKeyRef.current !== fitKey) {
+      if (bounds.length) {
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+        fittedKeyRef.current = fitKey;
+      } else if (hasHome) {
+        map.setView([home.lat, home.lon], 16);
+        fittedKeyRef.current = fitKey;
+      }
+    }
+  }, [ready, cattle, fences, highlightFenceId, fitKey, home]);
 
   // Polygon being drawn
   useEffect(() => {

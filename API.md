@@ -156,3 +156,24 @@ es.addEventListener("alert", (e) => showToast(JSON.parse(e.data)));
 
 ### Webhook (SMS / Telegram / WhatsApp / email bridge)
 If `ALERT_WEBHOOK_URL` is set, every alert is POSTed there as JSON (5s timeout, failures are logged and never block ingestion). If `ALERT_WEBHOOK_SECRET` is set, it is sent in the `X-MooMap-Secret` header.
+
+---
+
+## 5. Farm home location & cattle photos
+
+### Home location (user profile)
+`PUT /api/users/me` accepts `homeLocation`:
+```json
+{ "homeLocation": { "lat": 7.2701, "lon": 80.6012, "name": "Main farm" } }
+```
+Send `"homeLocation": null` to clear it. `GET /api/users/me` returns it. The portal uses it as the start view for its maps. The simulator's `npm run setup -- --fresh` builds the simulated pasture around it.
+
+### Cattle photos
+| Method | Path | Notes |
+| :--- | :--- | :--- |
+| POST | `/api/cattles/:id/image` | `{ "image": "data:image/jpeg;base64,…", "credit"?: "...", "sourceUrl"?: "https://…" }`. JPEG/PNG/WebP up to 5 MB, type checked from the file bytes. Replaces and deletes the previous photo. Owner only (404 otherwise). |
+| DELETE | `/api/cattles/:id/image` | Remove the photo |
+| GET | `/media/cattle/<random>.jpg` | The stored file (public, unguessable name, cached 30 days) |
+
+Cattle and `/api/me/overview` items include `Image` (a `/media/...` path), `imageCredit` and `imageSourceUrl`.
+Files are stored in `uploads/` (or `MEDIA_DIR`), which is not in git, so back it up with the server.

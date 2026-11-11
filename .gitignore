@@ -5,3 +5,6 @@ node_modules/
 
 # Local-only server notes (repo is public)
 SERVER_REPORT.md
+
+# Uploaded media (cattle photos)
+uploads/

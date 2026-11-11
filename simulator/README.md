@@ -20,6 +20,10 @@ cows around and sends their collar data over MQTT, the same way real collars do.
 | **LoRa (slave → master)** | Log-distance path loss with body loss and shadowing. Each spreading factor has its own sensitivity and SNR limit, plus random interference loss. If no master hears a packet, it is lost. When several masters hear it, the strongest one relays it. Time on air and duty cycle are checked. |
 | **Master collar** | Has the uplink. Publishes its own position as `type:"master"` and relays every slave frame it receives as `type:"slave"`, with `lora:{via,rssi,snr,sf,bw,freq,distance_m}`. |
 
+**Photos:** setup gives every cow a random real photo of cattle in Sri Lanka from Wikimedia Commons
+(Category: Cattle in Sri Lanka, 14 hand-picked photos in `src/photos.js`). The photographer and licence are stored and
+shown with each photo, as the Creative Commons licences require. Pass `--no-photos` to skip this.
+
 Messages use the format the backend already reads, on topic `cc/<collarId>/payload`.
 Set `RELAY_TOPIC=master` to publish relayed slave frames on the master's topic instead.
 Every message has `"sim": true`, so simulated data is easy to tell apart from real data.
@@ -30,7 +34,9 @@ Every message has `"sim": true`, so simulated data is easy to tell apart from re
 cd simulator
 npm install
 cp .env.example .env        # set MQTT_PASSWORD (the "simulator" broker user)
-npm run setup               # farmer + cattle + collars + geofence; writes herd.json
+npm run setup               # farmer + cattle + collars + geofence + photos; writes herd.json
+npm run setup -- --fresh    # new layout (pasture around the farmer's home location if set in the portal)
+npm run setup -- --photos   # pick new random photos for every cow
 npm start                   # interactive; type "help"
 npm start -- --scenario=demo
 npm run teardown            # remove the sim farmer, cattle and geofence
