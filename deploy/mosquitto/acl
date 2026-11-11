@@ -1,0 +1,12 @@
+# /etc/mosquitto/acl
+# backend: reads all collar traffic
+user backend
+topic read cc/#
+
+# simulator: may only publish collar payloads
+user simulator
+topic write cc/+/payload
+
+# collar: for real collars that connect directly to this broker later
+user collar
+topic write cc/+/payload
