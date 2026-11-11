@@ -103,6 +103,17 @@
   .actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .actions .btn { flex: 1; }
 
+  .mapwrap { position: relative; isolation: isolate; }
+  .pickbar { position: absolute; z-index: 1; top: 10px; left: 50%; transform: translateX(-50%); display: none; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+    background: rgba(47,47,47,.92); color: #fff; padding: 8px 10px 8px 14px; border-radius: 12px; font-size: .85rem; box-shadow: 0 6px 20px rgba(0,0,0,.25); width: max-content; max-width: calc(100% - 20px); }
+  .pickbar.on { display: flex; }
+  .pickbar .seg { border-color: rgba(255,255,255,.2); }
+  .pickbar .seg button { background: transparent; color: rgba(255,255,255,.75); min-height: 30px; padding: 4px 10px; }
+  .pickbar .seg button.active { background: var(--brand); color: #fff; }
+  .pickbar .seg button + button { border-left-color: rgba(255,255,255,.2); }
+  #map.picking, #map.picking .leaflet-interactive { cursor: crosshair; }
+  .btn.active { background: var(--charcoal); border-color: var(--charcoal); color: #fff; }
+  .dest { background: transparent; border: 0; font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.4)); }
   .toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--charcoal); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: .85rem; z-index: 2000; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
   .toast.show { opacity: 1; }
   .offline { background: var(--bad); color: #fff; text-align: center; padding: 8px; font-weight: 600; display: none; }
@@ -154,6 +165,7 @@
   </div>
   <div class="group">
     <button class="btn" id="txAll" title="Every collar transmits on the next tick">📡 Send all now</button>
+    <button class="btn" id="moveHerd" title="Pick a spot on the map and take the whole herd there">🎯 Move herd</button>
     <button class="btn" id="homeAll">🏠 All home</button>
   </div>
   <div class="group">
@@ -173,7 +185,17 @@
 
 <main>
   <div class="mapcol">
-    <div id="map" role="application" aria-label="Herd map. Drag a cow to move it."></div>
+    <div class="mapwrap">
+      <div id="map" role="application" aria-label="Herd map. Drag a cow to move it."></div>
+      <div class="pickbar" id="pickbar" role="dialog" aria-label="Move herd">
+        <span>Click the map where the herd should go</span>
+        <div class="seg" id="pickHow">
+          <button data-v="walk" class="active" title="Cows walk there and cross the fence on the way, like being driven">🚶 Walk</button>
+          <button data-v="teleport" title="Cows appear there instantly">⚡ Teleport</button>
+        </div>
+        <button class="btn sm" id="pickCancel">Cancel</button>
+      </div>
+    </div>
     <div class="card">
       <div class="legend">
         <span><i style="background:var(--ok)"></i>inside fence</span>
@@ -182,7 +204,7 @@
         <span><i style="background:var(--off)"></i>collar off / dead</span>
         <span><i class="line" style="border-color:var(--ok)"></i>LoRa link (strong → weak)</span>
         <span><i class="line" style="border-top-style:dashed;border-color:var(--bad)"></i>packet lost</span>
-        <span>Drag a cow on the map to move it</span>
+        <span>Drag a cow to move it · 🎯 Move herd: click a spot</span>
       </div>
     </div>
     <div class="card">
@@ -225,6 +247,21 @@ const map = L.map("map", { zoomControl: true });
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap" }).addTo(map);
 const fenceLayer = L.layerGroup().addTo(map), linkLayer = L.layerGroup().addTo(map), cowLayer = L.layerGroup().addTo(map);
 const markers = new Map();
+const destLayer = L.layerGroup().addTo(map);
+let picking = false, pickHow = "walk";
+
+function setPicking(on) {
+  picking = on;
+  $("pickbar").classList.toggle("on", on);
+  $("map").classList.toggle("picking", on);
+  $("moveHerd").classList.toggle("active", on);
+}
+map.on("click", (e) => {
+  if (!picking) return;
+  setPicking(false);
+  cmd(`herd ${e.latlng.lat.toFixed(6)} ${e.latlng.lng.toFixed(6)} ${pickHow}`);
+});
+addEventListener("keydown", (e) => e.key === "Escape" && picking && setPicking(false));
 
 function icon(c) {
   const st = status(c);
@@ -252,6 +289,13 @@ function drawMap() {
       L.polyline([[c.lat, c.lon], [masters[0].lat, masters[0].lon]], { color: COLOR.bad, weight: 2, dashArray: "5 6", opacity: .8, interactive: false }).addTo(linkLayer);
     }
   }
+  // herd destination flag
+  destLayer.clearLayers();
+  if (S.herdDestination) {
+    const d = S.herdDestination;
+    L.marker([d.lat, d.lon], { icon: L.divIcon({ className: "dest", html: "🚩", iconSize: [26, 26], iconAnchor: [5, 24] }), interactive: false, keyboard: false }).addTo(destLayer);
+    L.circle([d.lat, d.lon], { radius: 25, color: "#6c4ce0", weight: 1.5, dashArray: "4 4", fillOpacity: .06, interactive: false }).addTo(destLayer);
+  }
   // cows
   for (const c of S.cows) {
     let m = markers.get(c.collarId);
@@ -262,10 +306,14 @@ function drawMap() {
         .on("dragstart", () => (dragging = c.collarId))
         .on("dragend", (e) => { const p = e.target.getLatLng(); dragging = null; cmd(`move ${c.collarId} ${p.lat.toFixed(6)} ${p.lng.toFixed(6)}`); })
         .addTo(cowLayer);
+      m._lookKey = `${status(c)}|${c.role}|${selected === c.collarId}`;
       markers.set(c.collarId, m);
     }
-    if (dragging !== c.collarId) m.setLatLng([c.lat, c.lon]);
-    m.setIcon(icon(c));
+    if (dragging === c.collarId) continue; // never touch a marker while it is being dragged
+    m.setLatLng([c.lat, c.lon]);
+    // replacing the icon rebuilds the marker's DOM, so only do it when its look changes
+    const key = `${status(c)}|${c.role}|${selected === c.collarId}`;
+    if (m._lookKey !== key) { m.setIcon(icon(c)); m._lookKey = key; }
   }
 }
 
@@ -364,7 +412,14 @@ function drawChrome() {
 $("uplink").addEventListener("change", (e) => cmd(`master ${e.target.checked ? "up" : "down"}`));
 $("speed").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) cmd(`speed ${b.dataset.v}`); });
 $("txAll").addEventListener("click", () => cmd("tx all"));
-$("homeAll").addEventListener("click", () => cmd("home all"));
+$("homeAll").addEventListener("click", () => { setPicking(false); cmd("home all"); });
+$("moveHerd").addEventListener("click", () => setPicking(!picking));
+$("pickCancel").addEventListener("click", () => setPicking(false));
+$("pickHow").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  pickHow = b.dataset.v;
+  document.querySelectorAll("#pickHow button").forEach((x) => x.classList.toggle("active", x === b));
+});
 $("runScenario").addEventListener("click", () => cmd(`scenario ${$("scenario").value}`));
 
 function render() { if (!S) return; drawChrome(); drawMap(); drawHerd(); }

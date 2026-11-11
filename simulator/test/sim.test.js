@@ -69,3 +69,36 @@ test("a wandering cow leaves the fence and comes back when sent home", () => {
   assert.equal(cow.insideFence(pasture), true);
   assert.equal(cow.mode, "normal");
 });
+
+test("the whole herd walks to a chosen spot outside, grazes there, and comes home", () => {
+  const rnd = createRandom(11);
+  const pasture = makePasture(200, rnd);
+  const cows = Array.from({ length: 8 }, (_, i) => {
+    const p = randomPointInside(pasture, rnd);
+    return new Cow({ cattleId: `C${i}`, name: `c${i}`, collarId: `X${i}`, role: i ? "slave" : "master", x: p.x, y: p.y }, rnd);
+  });
+  const herd = new Herd(cows, pasture);
+  const spot = { x: 600, y: 300 }; // well outside the fence
+  herd.moveTo(spot, "walk");
+  for (let t = 0; t < 3600; t += 5) herd.step(5);
+  for (const c of cows) {
+    assert.equal(c.insideFence(pasture), false, `${c.name} should be outside`);
+    assert.ok(Math.hypot(c.x - spot.x, c.y - spot.y) < 60, `${c.name} near the spot`);
+    assert.equal(c.mode, "loiter");
+  }
+  // still there after grazing a while
+  for (let t = 0; t < 1800; t += 5) herd.step(5);
+  assert.ok(cows.every((c) => Math.hypot(c.x - spot.x, c.y - spot.y) < 60), "herd stays at the spot");
+  cows.forEach((c) => c.goHome(pasture));
+  for (let t = 0; t < 3600; t += 5) herd.step(5);
+  assert.ok(cows.every((c) => c.insideFence(pasture) && c.mode === "normal"), "herd back home");
+});
+
+test("teleporting the herd inside the fence resumes normal grazing", () => {
+  const rnd = createRandom(12);
+  const pasture = makePasture(200, rnd);
+  const cows = Array.from({ length: 5 }, (_, i) => new Cow({ cattleId: `C${i}`, name: `c${i}`, collarId: `X${i}`, role: "slave", x: 0, y: 0 }, rnd));
+  const herd = new Herd(cows, pasture);
+  herd.moveTo({ x: 20, y: -10 }, "teleport");
+  assert.ok(cows.every((c) => c.mode === "normal" && c.insideFence(pasture)));
+});

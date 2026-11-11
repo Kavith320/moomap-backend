@@ -7,7 +7,8 @@
 //   home   – walk back to the middle of the pasture, then resume normal behaviour
 const { pointInPolygon, distToEdge, centroid } = require("./geo");
 
-const SPEED = { graze: 0.15, walk: 0.7, rest: 0, wander: 0.9, home: 0.9 }; // m/s
+const SPEED = { graze: 0.15, walk: 0.7, rest: 0, wander: 0.9, home: 0.9, goto: 0.8 }; // m/s
+const LOITER_RADIUS_M = 25; // how far cows spread around a spot they were driven to
 const COHESION_M = 70; // beyond this distance from the herd centre, bias toward it
 
 class Cow {
@@ -46,8 +47,26 @@ class Cow {
       this.stateLeft = this.rnd.range(120, 600);
       this.target = null;
     } else {
-      this.mode = "wander";
-      this.target = { x, y };
+      this.mode = "loiter";
+      this.anchor = { x, y };
+    }
+  }
+
+  // Walk to a point; on arrival graze there (inside the fence: normal life again).
+  goTo(target) {
+    this.target = target;
+    this.mode = "goto";
+  }
+
+  settleAt(point, pasture) {
+    if (pointInPolygon(point, pasture)) {
+      this.mode = "normal";
+      this.state = "graze";
+      this.stateLeft = this.rnd.range(120, 600);
+      this.target = null;
+    } else {
+      this.mode = "loiter";
+      this.anchor = { x: point.x, y: point.y };
     }
   }
 
@@ -73,6 +92,30 @@ class Cow {
 
   step(dt, pasture, herdCentre) {
     let speed;
+    if (this.mode === "goto") {
+      // walking to a chosen spot (fences don't stop a driven herd)
+      speed = SPEED.goto;
+      const d = Math.hypot(this.target.x - this.x, this.target.y - this.y);
+      if (d < speed * dt) {
+        this.x = this.target.x;
+        this.y = this.target.y;
+        this.settleAt(this.target, pasture);
+        return;
+      }
+      this.heading = Math.atan2(this.target.y - this.y, this.target.x - this.x) + this.rnd.gauss(0, 0.1);
+      this.move(speed * dt);
+      return;
+    }
+    if (this.mode === "loiter") {
+      // grazing around the spot the herd was taken to, outside the pasture
+      const fromAnchor = Math.hypot(this.anchor.x - this.x, this.anchor.y - this.y);
+      this.heading =
+        fromAnchor > LOITER_RADIUS_M
+          ? Math.atan2(this.anchor.y - this.y, this.anchor.x - this.x)
+          : this.heading + this.rnd.gauss(0, 0.4);
+      this.move(SPEED.graze * dt);
+      return;
+    }
     if (this.mode === "wander" || this.mode === "home") {
       speed = SPEED[this.mode];
       this.heading = Math.atan2(this.target.y - this.y, this.target.x - this.x) + this.rnd.gauss(0, 0.15);
@@ -161,6 +204,21 @@ class Herd {
       const centre = centroid(this.cows.filter((c) => c.mode === "normal").map((c) => c.pos));
       for (const cow of this.cows) cow.step(dt / steps, this.pasture, centre);
     }
+  }
+
+  // Send the whole herd to a point. Each cow gets its own spot in a loose cluster
+  // around it (master included, so the slaves keep their relay nearby).
+  // how: "walk" (they cross the fence on the way, like being driven) or "teleport".
+  moveTo(point, how = "walk") {
+    const n = this.cows.length;
+    const spread = 6 + 4 * Math.sqrt(n);
+    this.cows.forEach((cow, i) => {
+      const angle = (i / n) * 2 * Math.PI + cow.rnd.range(-0.3, 0.3);
+      const r = i === 0 ? 0 : spread * Math.sqrt(cow.rnd.range(0.2, 1));
+      const spot = { x: point.x + r * Math.cos(angle), y: point.y + r * Math.sin(angle) };
+      if (how === "teleport") cow.teleport(spot.x, spot.y, this.pasture);
+      else cow.goTo(spot);
+    });
   }
 
   find(nameOrId) {

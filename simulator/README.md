@@ -43,6 +43,7 @@ npm run teardown            # remove the sim farmer, cattle and geofence
 With `CONTROL_PORT` set, the simulator serves a control panel at `http://127.0.0.1:<CONTROL_PORT>/`:
 - a live map of the pasture, every cow and the master collar, with LoRa links drawn from each slave to the master (coloured by signal; red dashed = packet lost)
 - **drag a cow on the map** to move it, inside or outside the fence
+- **🎯 Move herd**: click a spot on the map and the whole herd goes there. **Walk** drives them over (crossing the fence raises breakout alerts). **Teleport** puts them there at once. Outside the fence they graze around the 🚩 until **All home**; inside it they go back to normal grazing
 - one card per cow: fence status, signal (RSSI/SNR/via), battery slider, delivered/sent, and buttons for Break out / Go home, Collar off/on and Send now
 - toolbar: master uplink switch (gateway outage), speed (1×–60×), send all now, all home, run a scenario
 - packet statistics and an event log
@@ -64,6 +65,7 @@ Anyone who can open the panel can fake breakouts, so keep it off the public inte
 | `speed <x>` | Cow movement time scale |
 | `tx <cow\|all>` | Transmit now instead of waiting for the interval |
 | `move <cow> <lat> <lon>` | Drop a cow at a position (what dragging on the map does) |
+| `herd <lat> <lon> [walk\|teleport]` | Take the whole herd to a location (`home all` brings it back) |
 | `scenario <name>` | Start a scenario while running |
 
 ### Scenarios (`--scenario=` or `SCENARIO=`)

@@ -87,6 +87,8 @@ async function main() {
 
   const net = new Network({ herd, origin: state.origin, cfg, rnd, publish: link.publish, log });
 
+  let herdDestination = null; // { lat, lon, how } while the herd is being taken somewhere
+
   // Control surface used by scenarios and the REPL
   const ctl = {
     slave: (i) => {
@@ -184,6 +186,7 @@ async function main() {
   speed <x>                 time scale for cow movement
   tx <cow|all>              transmit now instead of waiting for the interval
   move <cow> <lat> <lon>    drop a cow at a position
+  herd <lat> <lon> [walk|teleport]  take the whole herd to a location ("home all" brings it back)
   scenario <name>           start a scenario (${Object.keys(SCENARIOS).join(", ")})
   <cow> = name, cattle ID or collar ID`;
 
@@ -206,6 +209,7 @@ async function main() {
         return `${cow.name} is breaking out`;
       case "home":
         if (a === "all") {
+          herdDestination = null;
           const out = cows.filter((c) => c.mode !== "normal");
           out.forEach((c) => ctl.home(c));
           return `${out.length} cow(s) heading home`;
@@ -248,6 +252,23 @@ async function main() {
         log(`📍 ${cow.name} moved ${cow.insideFence(state.pasture) ? "inside" : "OUTSIDE"} the fence`);
         return `${cow.name} moved`;
       }
+      case "herd": {
+        // herd <lat> <lon> [walk|teleport]
+        const [, lat, lon, how = "walk"] = String(input).trim().split(/\s+/);
+        if (!Number.isFinite(+lat) || !Number.isFinite(+lon) || !["walk", "teleport"].includes(how)) {
+          return "usage: herd <lat> <lon> [walk|teleport]";
+        }
+        const p = toXY(state.origin, +lat, +lon);
+        herd.moveTo(p, how);
+        herdDestination = { lat: +lat, lon: +lon, how };
+        const inside = require("./geo").pointInPolygon(p, state.pasture);
+        const dist = Math.round(Math.hypot(p.x - herd.cows[0].x, p.y - herd.cows[0].y));
+        log(
+          `🐮 Herd ${how === "teleport" ? "moved" : "walking"} to ${(+lat).toFixed(5)}, ${(+lon).toFixed(5)} ` +
+            `(${inside ? "inside" : "OUTSIDE"} the fence${how === "walk" ? `, ~${dist} m` : ""})`
+        );
+        return `herd ${how === "teleport" ? "moved" : "on the way"} (${inside ? "inside" : "outside"} the fence)`;
+      }
       case "scenario":
         if (!SCENARIOS[a]) return `scenarios: ${Object.keys(SCENARIOS).join(", ")}`;
         startScenario(a);
@@ -272,6 +293,7 @@ async function main() {
       radio: { ...radioSummary(cfg), sf: cfg.lora.sf, bwKhz: cfg.lora.bwKhz, freqMhz: cfg.lora.freqMhz },
       mqtt: { url: cfg.mqtt.url, connected: link.client.connected },
       fenceName: cfg.herd.fenceName,
+      herdDestination,
       pasture: state.pasture.map(ll),
       summary: net.summary(),
       cows: cows.map((c) => {
