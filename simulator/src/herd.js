@@ -35,6 +35,22 @@ class Cow {
     this.mode = "wander";
   }
 
+  // Drop the cow at a point (e.g. dragged on the map). Inside the fence it carries on
+  // grazing; outside it stays there until sent home.
+  teleport(x, y, pasture) {
+    this.x = x;
+    this.y = y;
+    if (pointInPolygon({ x, y }, pasture)) {
+      this.mode = "normal";
+      this.state = "graze";
+      this.stateLeft = this.rnd.range(120, 600);
+      this.target = null;
+    } else {
+      this.mode = "wander";
+      this.target = { x, y };
+    }
+  }
+
   goHome(pasture) {
     this.target = centroid(pasture);
     this.mode = "home";

@@ -7,6 +7,8 @@
 const fs = require("fs");
 const readline = require("readline");
 const http = require("http");
+const path = require("path");
+const { toLatLon, toXY } = require("./geo");
 const cfg = require("./config");
 const { createRandom } = require("./random");
 const { Cow, Herd } = require("./herd");
@@ -60,7 +62,12 @@ async function main() {
   const rnd = createRandom(cfg.seed + 1);
   const cows = state.cows.map((c) => new Cow({ ...c, x: c.home.x, y: c.home.y }, rnd));
   const herd = new Herd(cows, state.pasture);
-  const log = (...a) => console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
+  const events = []; // recent log lines for the control panel
+  const log = (...a) => {
+    console.log(`[${new Date().toLocaleTimeString()}]`, ...a);
+    events.push({ at: Date.now(), text: a.join(" ") });
+    if (events.length > 200) events.shift();
+  };
 
   const radio = radioSummary(cfg);
   log(
@@ -108,17 +115,22 @@ async function main() {
     },
   };
 
-  // scenario timeline
-  const scenarioName = arg("scenario") || process.env.SCENARIO || "calm";
-  const scenario = SCENARIOS[scenarioName];
-  if (!scenario) {
+  // scenario timeline (can be (re)started at runtime from the panel or `scenario <name>`)
+  const scenarioSpeed = Math.max(0.01, Number(process.env.SCENARIO_SPEED) || 1); // >1 runs the timeline faster
+  let scenarioName = arg("scenario") || process.env.SCENARIO || "calm";
+  if (!SCENARIOS[scenarioName]) {
     log(`✖ Unknown scenario "${scenarioName}". Options: ${Object.keys(SCENARIOS).join(", ")}`);
     process.exit(1);
   }
-  const startedAt = Date.now();
-  const scenarioSpeed = Math.max(0.01, Number(process.env.SCENARIO_SPEED) || 1); // >1 runs the timeline faster
-  const pending = [...scenario];
-  log(`▶ Scenario: ${scenarioName}${pending.length ? ` (${pending.length} step${pending.length > 1 ? "s" : ""})` : ""}`);
+  let startedAt = Date.now();
+  let pending = [...SCENARIOS[scenarioName]];
+  const startScenario = (name) => {
+    scenarioName = name;
+    startedAt = Date.now();
+    pending = [...SCENARIOS[name]];
+    log(`▶ Scenario: ${name}${pending.length ? ` (${pending.length} step${pending.length > 1 ? "s" : ""})` : ""}`);
+  };
+  startScenario(scenarioName);
 
   // main loop: 1 s real time
   let busy = false;
@@ -170,6 +182,9 @@ async function main() {
   off <cow> / on <cow>      switch a collar off / on     (offline alert after OFFLINE_AFTER_MINUTES)
   master down|up [id]       master uplink fails / returns: all slaves go silent
   speed <x>                 time scale for cow movement
+  tx <cow|all>              transmit now instead of waiting for the interval
+  move <cow> <lat> <lon>    drop a cow at a position
+  scenario <name>           start a scenario (${Object.keys(SCENARIOS).join(", ")})
   <cow> = name, cattle ID or collar ID`;
 
   // One command handler for the interactive prompt and the control port. Returns text.
@@ -213,29 +228,123 @@ async function main() {
         ctl.setMaster(a !== "down", b);
         return `master ${a === "down" ? "down" : "up"}`;
       case "speed":
-        cfg.timing.timeScale = Math.max(0.1, Number(a) || 1);
+        cfg.timing.timeScale = Math.max(0.1, Math.min(200, Number(a) || 1));
+        log(`⏩ cow movement ${cfg.timing.timeScale}x`);
         return `time scale ${cfg.timing.timeScale}x`;
+      case "tx": {
+        // transmit on the next tick instead of waiting for the interval
+        const list = a === "all" ? net.collars : find(a) ? [net.byId.get(find(a).collarId)] : [];
+        if (!list.length) return missing(a);
+        list.forEach((c) => (c.nextTxAt = 0));
+        return `${list.length} collar(s) transmit now`;
+      }
+      case "move": {
+        // move <cow> <lat> <lon>
+        if (!(cow = find(a))) return missing(a);
+        const [, , lat, lon] = String(input).trim().split(/\s+/);
+        if (!Number.isFinite(+lat) || !Number.isFinite(+lon)) return "usage: move <cow> <lat> <lon>";
+        const p = toXY(state.origin, +lat, +lon);
+        cow.teleport(p.x, p.y, state.pasture);
+        log(`📍 ${cow.name} moved ${cow.insideFence(state.pasture) ? "inside" : "OUTSIDE"} the fence`);
+        return `${cow.name} moved`;
+      }
+      case "scenario":
+        if (!SCENARIOS[a]) return `scenarios: ${Object.keys(SCENARIOS).join(", ")}`;
+        startScenario(a);
+        return `scenario ${a} started`;
       default:
         return `Unknown command "${cmd}". Try: help`;
     }
   };
 
-  // Control port (localhost only) so a background run (pm2) can still be driven:
-  //   npm run cmd -- wander Sudu
+  // JSON snapshot for the control panel
+  const snapshot = () => {
+    const ll = (p) => {
+      const r = toLatLon(state.origin, p.x, p.y);
+      return { lat: +r.lat.toFixed(6), lon: +r.lon.toFixed(6) };
+    };
+    return {
+      now: Date.now(),
+      scenario: scenarioName,
+      scenarios: Object.keys(SCENARIOS),
+      timeScale: cfg.timing.timeScale,
+      intervals: { slave: cfg.timing.slaveIntervalS, master: cfg.timing.masterIntervalS },
+      radio: { ...radioSummary(cfg), sf: cfg.lora.sf, bwKhz: cfg.lora.bwKhz, freqMhz: cfg.lora.freqMhz },
+      mqtt: { url: cfg.mqtt.url, connected: link.client.connected },
+      fenceName: cfg.herd.fenceName,
+      pasture: state.pasture.map(ll),
+      summary: net.summary(),
+      cows: cows.map((c) => {
+        const col = net.byId.get(c.collarId);
+        return {
+          name: c.name,
+          cattleId: c.cattleId,
+          collarId: c.collarId,
+          role: c.role,
+          ...ll(c.pos),
+          activity: c.mode === "normal" ? c.state : c.mode,
+          inside: c.insideFence(state.pasture),
+          fenceDistanceM: Math.round(c.fenceDistance(state.pasture)),
+          battery: Math.round(col.battery * 10) / 10,
+          alive: col.alive,
+          nextTxInS: Math.max(0, Math.round((col.nextTxAt - Date.now()) / 1000)),
+          last: col.last,
+          stats: col.stats,
+        };
+      }),
+      events: events.slice(-60),
+    };
+  };
+
+  // Control server (localhost only). Serves the control panel, a JSON API and the
+  // plain-text command endpoint used by `npm run cmd`.
+  //   GET  /            control panel (web UI)
+  //   GET  /api/state   JSON snapshot
+  //   POST /api/cmd     {"command":"wander Sudu"} -> {"output": "..."}
+  //   POST /            plain-text command (npm run cmd)
   let control = null;
   const controlPort = Number(process.env.CONTROL_PORT || 0);
+  const panelHtml = path.join(__dirname, "..", "public", "index.html");
   if (controlPort) {
     control = http
       .createServer((req, res) => {
         let body = "";
-        req.on("data", (d) => (body += d));
+        req.on("data", (d) => {
+          body += d;
+          if (body.length > 10000) req.destroy();
+        });
         req.on("end", () => {
-          const out = req.method === "POST" ? execute(body) : statusText();
-          res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-          res.end(out + "\n");
+          const send = (code, type, data) => {
+            res.writeHead(code, { "Content-Type": type, "Cache-Control": "no-store" });
+            res.end(data);
+          };
+          const url = (req.url || "/").split("?")[0];
+          try {
+            if (req.method === "GET" && (url === "/" || url === "/index.html")) {
+              return send(200, "text/html; charset=utf-8", fs.readFileSync(panelHtml));
+            }
+            if (req.method === "GET" && url === "/api/state") {
+              return send(200, "application/json", JSON.stringify(snapshot()));
+            }
+            if (req.method === "POST" && url === "/api/cmd") {
+              const { command } = JSON.parse(body || "{}");
+              return send(200, "application/json", JSON.stringify({ output: execute(command || "") }));
+            }
+            if (req.method === "POST" && url === "/") {
+              return send(200, "text/plain; charset=utf-8", execute(body) + "\n");
+            }
+            if (req.method === "GET" && url === "/status") {
+              return send(200, "text/plain; charset=utf-8", statusText() + "\n");
+            }
+            send(404, "text/plain", "not found");
+          } catch (err) {
+            send(400, "application/json", JSON.stringify({ error: err.message }));
+          }
         });
       })
-      .listen(controlPort, "127.0.0.1", () => log(`Control port on 127.0.0.1:${controlPort}`));
+      .listen(controlPort, process.env.CONTROL_HOST || "127.0.0.1", () =>
+        log(`Control panel on http://${process.env.CONTROL_HOST || "127.0.0.1"}:${controlPort}`)
+      );
   }
 
   const shutdown = async () => {
