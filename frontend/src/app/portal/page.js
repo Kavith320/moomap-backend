@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { BatteryLow, Bell, Crosshair, PawPrint, RefreshCw, ShieldAlert, Wifi } from "lucide-react";
+import { BatteryLow, Bell, Crosshair, RefreshCw, ShieldAlert, Wifi } from "lucide-react";
+import HoofPrint from "@/components/portal/HoofPrint";
 import LeafletMap from "@/components/portal/LeafletMap";
 import { PageHeader, usePortal } from "@/components/portal/PortalShell";
 import { COLORS, cattleStatus, hasLocation, timeAgo } from "@/lib/portal";
@@ -90,7 +91,7 @@ export default function OverviewPage() {
       {data && (
         <>
           <div className="pt-stats">
-            <Stat icon={PawPrint} color={COLORS.primary} value={s.cattle} label="Cattle" href="/portal/cattle" />
+            <Stat icon={HoofPrint} color={COLORS.primary} value={s.cattle} label="Cattle" href="/portal/cattle" />
             <Stat
               icon={ShieldAlert}
               color={s.outside ? COLORS.danger : COLORS.success}
@@ -123,7 +124,7 @@ export default function OverviewPage() {
 
           {cattle.length === 0 ? (
             <div className="pt-card pt-empty">
-              <PawPrint size={44} />
+              <HoofPrint size={44} />
               <h3>No cattle yet</h3>
               <p>Add your first animal and attach its collar to see it on the map.</p>
               <Link href="/portal/cattle" className="pt-btn pt-btn-primary">

@@ -2,7 +2,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Fence, LayoutDashboard, LogOut, PawPrint, User, X } from "lucide-react";
+import { Bell, Fence, LayoutDashboard, LogOut, User, X } from "lucide-react";
+import HoofPrint from "@/components/portal/HoofPrint";
 import { API_URL, apiRequest, clearSession, getSession, saveUser } from "@/lib/portal";
 
 const PortalContext = createContext(null);
@@ -12,7 +13,7 @@ export const NOTIFY_PREF_KEY = "portalBrowserNotifications";
 
 const NAV = [
   { href: "/portal", label: "Overview", icon: LayoutDashboard },
-  { href: "/portal/cattle", label: "Cattle", icon: PawPrint },
+  { href: "/portal/cattle", label: "Cattle", icon: HoofPrint },
   { href: "/portal/geofences", label: "Geofences", icon: Fence },
   { href: "/portal/alerts", label: "Alerts", icon: Bell },
   { href: "/portal/profile", label: "Profile", icon: User },

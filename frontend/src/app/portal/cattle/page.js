@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { MapPin, Pencil, PawPrint, Plus, Search, Trash2 } from "lucide-react";
+import { MapPin, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import HoofPrint from "@/components/portal/HoofPrint";
 import Modal from "@/components/portal/Modal";
 import { PageHeader, usePortal } from "@/components/portal/PortalShell";
 import { cattleStatus, hasLocation, timeAgo } from "@/lib/portal";
@@ -92,7 +93,7 @@ export default function CattlePage() {
 
       {items && items.length === 0 && (
         <div className="pt-card pt-empty">
-          <PawPrint size={44} />
+          <HoofPrint size={44} />
           <h3>No cattle yet</h3>
           <p>Add an animal and enter the ID printed on its collar.</p>
           <button type="button" className="pt-btn pt-btn-primary" onClick={() => setEditing({ mode: "create", form: EMPTY })}>
