@@ -24,7 +24,7 @@ const API = "https://commons.wikimedia.org/w/api.php";
 
 const stripHtml = (s) => String(s || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
-async function fetchPhotoSet(width = 800) {
+async function fetchPhotoSet(width = 480) {
   const url =
     `${API}?action=query&pageids=${PAGE_IDS.join("|")}&prop=imageinfo` +
     `&iiprop=url|extmetadata&iiurlwidth=${width}&format=json&origin=*`;

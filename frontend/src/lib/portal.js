@@ -120,7 +120,7 @@ export function mediaUrl(path) {
 
 // Shrink a photo in the browser before upload (phones take 4000px+ photos).
 // Returns a JPEG data URL no larger than maxSide on its longest edge.
-export function resizeImage(file, maxSide = 1024, quality = 0.82) {
+export function resizeImage(file, maxSide = 800, quality = 0.78) {
   return new Promise((resolve, reject) => {
     if (!file || !/^image\//.test(file.type)) return reject(new Error("Choose an image file"));
     const url = URL.createObjectURL(file);
