@@ -397,7 +397,10 @@ async function main() {
             // ---- everything else needs an admin session or the local command key ----
             if (!auth.identify(req)) {
               if (req.method === "GET" && (url === "/" || url === "/index.html")) {
-                return send(302, "text/plain", "login required", { Location: "login" });
+                // Through a proxy (Funnel / serve) use the full path: a request for "/simulator"
+                // arrives here as "/" and a relative "login" would land on the portal's /login.
+                const local = /^(127\.0\.0\.1|localhost)(:|$)/.test(String(req.headers.host || ""));
+                return send(302, "text/plain", "login required", { Location: local || !base ? "login" : `${base}/login` });
               }
               return send(401, "application/json", '{"error":"login required"}');
             }
