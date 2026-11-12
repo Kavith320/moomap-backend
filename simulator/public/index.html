@@ -436,17 +436,27 @@ $("runScenario").addEventListener("click", () => cmd(`scenario ${$("scenario").v
 
 function render() { if (!S) return; drawChrome(); drawMap(); drawHerd(); }
 
-async function refresh() {
-  try {
-    const r = await fetch("api/state", { cache: "no-store" });
-    if (r.status === 401) { location.href = "login"; return; }
-    S = await r.json();
-    $("offline").style.display = "none";
-    render();
-  } catch { $("offline").style.display = "block"; }
+// Poll the simulator: one request at a time, next one 1 s after the previous finished.
+// Over the public (Funnel) route a request can take 0.5–2 s, so a fixed 1 s timer would pile them up.
+let inFlight = null, pollTimer = null;
+function refresh() {
+  if (inFlight) return inFlight;
+  inFlight = (async () => {
+    try {
+      const r = await fetch("api/state", { cache: "no-store" });
+      if (r.status === 401) { location.href = "login"; return; }
+      S = await r.json();
+      $("offline").style.display = "none";
+      render();
+    } catch { $("offline").style.display = "block"; }
+  })().finally(() => {
+    inFlight = null;
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(refresh, 1000);
+  });
+  return inFlight;
 }
 refresh();
-setInterval(refresh, 1000);
 </script>
 </body>
 </html>
