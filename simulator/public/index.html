@@ -153,6 +153,7 @@
     <span class="pill" id="radioPill">LoRa</span>
     <span class="pill" id="scnPill">Scenario</span>
   </div>
+  <button class="btn sm" id="logout" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.25)">Log out</button>
 </header>
 
 <div class="toolbar">
@@ -236,6 +237,7 @@ function toast(msg) {
 async function cmd(command) {
   try {
     const r = await fetch("api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command }) });
+    if (r.status === 401) { location.href = "login"; return; }
     const d = await r.json();
     toast(d.output || d.error || "done");
     refresh();
@@ -414,6 +416,7 @@ function drawChrome() {
   $("events").innerHTML = S.events.slice().reverse().map((e) => `<li><time>${new Date(e.at).toLocaleTimeString()}</time><span>${esc(e.text)}</span></li>`).join("") || "<li>No events yet</li>";
 }
 
+$("logout").addEventListener("click", async () => { await fetch("logout", { method: "POST" }).catch(() => {}); location.href = "login"; });
 $("uplink").addEventListener("change", (e) => cmd(`master ${e.target.checked ? "up" : "down"}`));
 $("speed").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) cmd(`speed ${b.dataset.v}`); });
 $("txAll").addEventListener("click", () => cmd("tx all"));
@@ -432,6 +435,7 @@ function render() { if (!S) return; drawChrome(); drawMap(); drawHerd(); }
 async function refresh() {
   try {
     const r = await fetch("api/state", { cache: "no-store" });
+    if (r.status === 401) { location.href = "login"; return; }
     S = await r.json();
     $("offline").style.display = "none";
     render();

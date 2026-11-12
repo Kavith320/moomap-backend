@@ -54,9 +54,12 @@ With `CONTROL_PORT` set, the simulator serves a control panel at `http://127.0.0
 - toolbar: master uplink switch (gateway outage), speed (1×–60×), send all now, all home, run a scenario
 - packet statistics and an event log
 
-On the server it is published **only inside the tailnet** (never through Funnel):
-`tailscale serve --bg --https=7443 http://127.0.0.1:7070` → `https://moomap-localserver.taile78ad3.ts.net:7443`.
-Anyone who can open the panel can fake breakouts, so keep it off the public internet.
+**Access & login.** The panel can be reached from anywhere at
+`https://moomap-localserver.taile78ad3.ts.net/simulator/` (Tailscale Funnel), and inside the tailnet at `:7443`.
+Every page and API call requires signing in with a **MooMap admin account**. The panel checks the account against the backend,
+and normal farmer accounts are refused. Sessions last 12 hours (HttpOnly cookie, Secure over HTTPS). Eight wrong passwords lock that client
+out for 10 minutes. `npm run cmd` on the server keeps working without a login: it uses a random key the simulator writes to
+`simulator/.control-token` (readable only by the server account). `PANEL_AUTH=off` disables the login, for local development only.
 
 ### Commands (interactive, or `npm run cmd -- <command>` while running in the background)
 

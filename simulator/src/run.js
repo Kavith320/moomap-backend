@@ -15,6 +15,7 @@ const { Cow, Herd } = require("./herd");
 const { Network, radioSummary } = require("./network");
 const { connectMqtt } = require("./mqttLink");
 const { createApi } = require("./backendApi");
+const { createPanelAuth } = require("./panelAuth");
 
 // at: seconds after start (real time). `cow` is an index into the slave list, so a
 // scenario never moves the master (which would take the whole herd's uplink with it).
@@ -357,6 +358,10 @@ async function main() {
   let control = null;
   const controlPort = Number(process.env.CONTROL_PORT || 0);
   const panelHtml = path.join(__dirname, "..", "public", "index.html");
+  const loginHtml = path.join(__dirname, "..", "public", "login.html");
+  const auth = controlPort
+    ? createPanelAuth({ backendUrl: cfg.backendUrl, tokenFile: path.join(__dirname, "..", ".control-token"), log })
+    : null;
   if (controlPort) {
     control = http
       .createServer((req, res) => {
@@ -366,14 +371,39 @@ async function main() {
           if (body.length > 10000) req.destroy();
         });
         req.on("end", () => {
-          const send = (code, type, data) => {
-            res.writeHead(code, { "Content-Type": type, "Cache-Control": "no-store" });
+          const SECURITY = { "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
+          const send = (code, type, data, extra = {}) => {
+            res.writeHead(code, { "Content-Type": type, "Cache-Control": "no-store", ...SECURITY, ...extra });
             res.end(data);
           };
-          const url = (req.url || "/").split("?")[0];
+          // Published at https://<host>/simulator/ : accept the prefix whether or not the proxy strips it
+          const base = (process.env.PANEL_BASE_PATH || "/simulator").replace(/\/$/, "");
+          let url = (req.url || "/").split("?")[0];
+          if (base && url === base) return send(301, "text/plain", "moved", { Location: base + "/" });
+          if (base && url.startsWith(base + "/")) url = url.slice(base.length);
           try {
+            // ---- login (no session needed) ----
+            if (req.method === "GET" && url === "/login") {
+              return send(200, "text/html; charset=utf-8", fs.readFileSync(loginHtml));
+            }
+            if (req.method === "POST" && url === "/login") {
+              return auth.login(req, body).then((r) =>
+                send(r.status, "application/json", JSON.stringify(r.body), r.cookie ? { "Set-Cookie": r.cookie } : {})
+              );
+            }
+            if (req.method === "POST" && url === "/logout") {
+              return send(200, "application/json", '{"ok":true}', { "Set-Cookie": auth.logout(req) });
+            }
+            // ---- everything else needs an admin session or the local command key ----
+            if (!auth.identify(req)) {
+              if (req.method === "GET" && (url === "/" || url === "/index.html")) {
+                return send(302, "text/plain", "login required", { Location: "login" });
+              }
+              return send(401, "application/json", '{"error":"login required"}');
+            }
             if (req.method === "GET" && (url === "/" || url === "/index.html")) {
               return send(200, "text/html; charset=utf-8", fs.readFileSync(panelHtml));
+              // (only reached with a valid session)
             }
             if (req.method === "GET" && url.startsWith("/media/") && !url.includes("..")) {
               // photos live on the backend; proxy them so the panel only needs this one address
@@ -412,7 +442,10 @@ async function main() {
         });
       })
       .listen(controlPort, process.env.CONTROL_HOST || "127.0.0.1", () =>
-        log(`Control panel on http://${process.env.CONTROL_HOST || "127.0.0.1"}:${controlPort}`)
+        log(
+          `Control panel on http://${process.env.CONTROL_HOST || "127.0.0.1"}:${controlPort}` +
+            (auth.enabled ? " (admin login required)" : " (PANEL_AUTH=off: no login!)")
+        )
       );
   }
 
